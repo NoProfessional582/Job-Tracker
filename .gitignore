@@ -1,0 +1,30 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Virtual environment folders
+.venv/
+venv/
+ENV/
+env/
+ENV/
+
+# Database files (local SQLite db should not be tracked)
+db/database.sqlite
+
+# Local file uploads (keep directory via .gitkeep but ignore files)
+uploads/*
+!uploads/.gitkeep
+
+# IDE and OS specific files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
