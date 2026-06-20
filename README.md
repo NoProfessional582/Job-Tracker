@@ -7,6 +7,8 @@ Built with a lightweight **Python Flask backend** and a high-fidelity **Vanilla 
 Coded with AI.
 
 ---
+![Screenshot of Web App](/screenshot.png)
+---
 
 ## 🚀 Key Features
 
