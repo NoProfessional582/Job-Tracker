@@ -276,12 +276,14 @@ def init_db():
         cursor.execute("INSERT INTO app_settings (key, value) VALUES ('snooze_duration_days', '7')")
         cursor.execute("INSERT INTO app_settings (key, value) VALUES ('default_status_id', '1')")
         cursor.execute("INSERT INTO app_settings (key, value) VALUES ('calendar_start_hour', '7')")
-        cursor.execute("INSERT INTO app_settings (key, value) VALUES ('calendar_end_hour', '19')")
         cursor.execute("INSERT INTO app_settings (key, value) VALUES ('calendar_first_day_of_week', '0')")
         cursor.execute("INSERT INTO app_settings (key, value) VALUES ('kanban_default_sort', 'last_activity')")
         cursor.execute("INSERT INTO app_settings (key, value) VALUES ('active_theme_id', '1')")
         cursor.execute("INSERT INTO app_settings (key, value) VALUES ('default_timezone', 'America/Los_Angeles')")
         print("Seeded default settings.")
+
+    # Clean up legacy end hour setting if it exists
+    cursor.execute("DELETE FROM app_settings WHERE key = 'calendar_end_hour'")
 
     # Ensure default_timezone is set
     cursor.execute("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('default_timezone', 'America/Los_Angeles')")

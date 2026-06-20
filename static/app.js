@@ -1465,7 +1465,6 @@ function renderSettings() {
   document.getElementById('param-snooze-days').value = settings.snooze_duration_days || '7';
   document.getElementById('param-first-day').value = settings.calendar_first_day_of_week || '0';
   document.getElementById('param-start-hour').value = settings.calendar_start_hour || '7';
-  document.getElementById('param-end-hour').value = settings.calendar_end_hour || '19';
   document.getElementById('param-kanban-sort').value = settings.kanban_default_sort || 'last_activity';
 
   const tzSelect = document.getElementById('param-timezone');
@@ -1763,7 +1762,6 @@ document.getElementById('app-settings-form').addEventListener('submit', async (e
     default_status_id: document.getElementById('param-default-status').value,
     calendar_first_day_of_week: document.getElementById('param-first-day').value,
     calendar_start_hour: document.getElementById('param-start-hour').value,
-    calendar_end_hour: document.getElementById('param-end-hour').value,
     kanban_default_sort: document.getElementById('param-kanban-sort').value,
     default_timezone: document.getElementById('param-timezone').value
   };

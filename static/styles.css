@@ -22,7 +22,20 @@
   
   --transition-fast: 0.15s cubic-bezier(0.4, 0, 0.2, 1);
   --transition-normal: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  
+  /* Calendar line contrast variables (Light theme defaults) */
+  --theme-calendar-border: rgba(0, 0, 0, 0.22);
+  --theme-calendar-border-hour: rgba(0, 0, 0, 0.18);
+  --theme-calendar-border-half-hour: rgba(0, 0, 0, 0.10);
 }
+
+/* Dark Mode overrides for calendar line contrast */
+.dark-mode {
+  --theme-calendar-border: rgba(255, 255, 255, 0.22);
+  --theme-calendar-border-hour: rgba(255, 255, 255, 0.16);
+  --theme-calendar-border-half-hour: rgba(255, 255, 255, 0.08);
+}
+
 
 * {
   box-sizing: border-box;
@@ -431,7 +444,7 @@ body {
   background: var(--theme-card-bg);
   border: 1px solid var(--theme-border);
   border-radius: var(--radius-md);
-  padding: 12px 14px;
+  padding: 12px 14px 12px 18px; /* 18px left padding to balance 9px accent streak */
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -452,7 +465,7 @@ body {
   top: 0;
   left: 0;
   bottom: 0;
-  width: 4px;
+  width: 9px;
 }
 
 .job-card-main-info {
@@ -636,7 +649,7 @@ body {
   min-width: 0;
   overflow: hidden;
   background: rgba(0, 0, 0, 0.1);
-  border: 1px solid var(--theme-border);
+  border: 1px solid var(--theme-calendar-border);
   border-radius: var(--radius-sm);
   padding: 8px;
   display: flex;
@@ -713,13 +726,16 @@ body {
   gap: 8px;
   min-width: 950px;
   width: 100%;
+  flex-grow: 1;
+  min-height: 0;
+  height: 100%;
 }
 
 /* Week View Grid */
 .week-grid-container {
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--theme-border);
+  border: 1px solid var(--theme-calendar-border);
   border-radius: var(--radius-sm);
   overflow: hidden;
   flex-grow: 1;
@@ -738,8 +754,8 @@ body {
   width: 65px;
   height: 60px;
   flex-shrink: 0;
-  border-right: 1px solid var(--theme-border);
-  border-bottom: 1px solid var(--theme-border);
+  border-right: 1px solid var(--theme-calendar-border);
+  border-bottom: 1px solid var(--theme-calendar-border);
   background: var(--theme-background);
 }
 
@@ -752,8 +768,8 @@ body {
   flex: 1;
   min-width: 120px;
   height: 60px;
-  border-right: 1px solid var(--theme-border);
-  border-bottom: 1px solid var(--theme-border);
+  border-right: 1px solid var(--theme-calendar-border);
+  border-bottom: 1px solid var(--theme-calendar-border);
   background: var(--theme-background);
   display: flex;
   flex-direction: column;
@@ -769,7 +785,7 @@ body {
   width: 8px;
   flex-shrink: 0;
   background: var(--theme-background);
-  border-bottom: 1px solid var(--theme-border);
+  border-bottom: 1px solid var(--theme-calendar-border);
 }
 
 .week-body-row {
@@ -784,7 +800,7 @@ body {
 .week-time-col {
   width: 65px;
   flex-shrink: 0;
-  border-right: 1px solid var(--theme-border);
+  border-right: 1px solid var(--theme-calendar-border);
   background: var(--theme-background);
   min-height: 1440px; /* matches day column height so bg fills full scroll area */
 }
@@ -796,7 +812,7 @@ body {
   justify-content: center;
   font-size: 11px;
   color: var(--theme-text-muted);
-  border-bottom: 1px solid rgba(255,255,255,0.03);
+  border-bottom: 1px solid var(--theme-calendar-border-hour);
 }
 
 .week-days-grid {
@@ -808,7 +824,7 @@ body {
 .week-day-col {
   flex: 1;
   min-width: 120px;
-  border-right: 1px solid var(--theme-border);
+  border-right: 1px solid var(--theme-calendar-border);
   position: relative;
   height: 1440px; /* Force stretches day columns to full vertical height of hours */
 }
@@ -853,11 +869,11 @@ body {
 
 .week-slot {
   height: 30px; /* 30 min intervals */
-  border-bottom: 1px solid rgba(255, 255, 255, 0.02);
+  border-bottom: 1px dashed var(--theme-calendar-border-half-hour);
 }
 
 .week-slot:nth-child(even) {
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid var(--theme-calendar-border-hour);
 }
 
 .week-event-card {
@@ -1278,6 +1294,7 @@ textarea {
   grid-auto-rows: 1fr;
   flex-grow: 1;
   min-height: 0;
+  height: 100%;
 }
 
 #panel-settings {
