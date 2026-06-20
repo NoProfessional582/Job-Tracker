@@ -1,24 +1,25 @@
 # 💼 Job Tracker
 
-A premium, relational job application tracking platform featuring a responsive Kanban Board, comprehensive Interview Calendar, automatic Activity logs, attachment management, and smart staleness notifications.
+A job application tracking platform powered by python and a liteweight relational database, featuring a Kanban style Job Board dashboard, an Event Calendar, Activity logs, attachment management, and staleness notifications.
 
 Built with a lightweight **Python Flask backend** and a high-fidelity **Vanilla HTML/CSS/JS Single Page Application (SPA)**. It runs entirely as a single process with **no build steps, no node_modules dependencies, and no complex configurations**.
+
+Coded with AI.
 
 ---
 
 ## 🚀 Key Features
 
-* **🗂️ Dynamic Kanban Board**:
-  * **Relational Drag & Drop Pipeline**: View applications categorized by status or organization.
-  * **Automated Card Footers**: Column footers stretch to the bottom of the page, keeping columns vertically aligned and positioning the horizontal scrollbar at the bottom of the screen.
+* **🗂️ Kanban Job Board**:
+  * **Simple Kanban Style Dashboard**: View applications categorized by status or organization.
   * **Visual Accent colors**: Columns and cards dynamically match status configurations.
 * **📅 Interactive Split-View Calendar**:
   * **Month & Week views**: View recruiter touchpoints, interviews, and deadlines with color-coded pills.
-  * **Drag & Scroll Layout**: Pin header dates and vertically scroll time blocks synchronously.
   * **Overlapping Event Layout**: Shows side-by-side events in weekly columns with auto-truncated text.
-* **🔔 Proactive Bell Notifications**:
-  * Audits job updates and flags opportunities that have gone inactive/stale for over 14 days.
-  * Bell icon with dynamic count badge and dropdown. Allows individual dismissals, clears, snoozes, or clear-all.
+  * **Tentative vs Confirmed Events**: Tentative events are outlined in dashed line while confirmed events have a solid outline.
+* **🔔 Proactive Notifications**:
+  * Audits job updates and flags opportunities that have gone inactive/stale for over 14 days (configurable).
+  * Notification icon with dynamic count badge and dropdown. Allows individual dismissals, clears, snoozes, or clear-all.
   * Clear history logs to see a detailed audit path of past cleared notifications.
 * **📂 Document & Timeline Logging**:
   * Note Originators distinguish between User, Contacts, or general updates.
@@ -26,8 +27,8 @@ Built with a lightweight **Python Flask backend** and a high-fidelity **Vanilla 
   * Attachments strictly limited to `.pdf` and `.docx`. Securely stored on disk as UUIDs and streamed dynamically.
   * Inline Note Editing directly in the update timeline feed.
 * **⚙️ Administration Control Panel**:
-  * **Column Manager**: Rename columns, change hex color codes, and shift columns up or down.
-  * **Event Type Editor**: Customize interview types, colors, and ordering.
+  * **Column Manager**: Rename job status columns, change hex color codes, and shift columns up or down.
+  * **Event Type Editor**: Customize event options for calendar scheduling; interview types, colors, and ordering.
   * **Parameters Configuration**: Customize calendar work hours, weekly start day, and stale job days thresholds.
   * **Visual Theme Builder**: Adapt custom color schemes, select Default Light, or Select Default Dark mode.
 
@@ -66,7 +67,7 @@ Ensure you have Python 3.8 or higher installed on your machine.
 ### 2. Clone the Repository
 Clone the project directory to your local environment:
 ```bash
-git clone <your-repository-url>
+git clone https://github.com/NoProfessional582/Job-Tracker
 cd Job-Tracker
 ```
 
