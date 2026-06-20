@@ -4,6 +4,8 @@ A job application tracking platform powered by python and a liteweight relationa
 
 Built with a lightweight **Python Flask backend** and a high-fidelity **Vanilla HTML/CSS/JS Single Page Application (SPA)**. It runs entirely as a single process with **no build steps, no node_modules dependencies, and no complex configurations**.
 
+Coded with AI.
+
 ---
 
 ## 🚀 Key Features
