@@ -6,6 +6,10 @@ let filterStatuses = []; // Hidden status IDs
 let filterLocation = '';
 let filterRemoteOnly = false;
 let boardSortPref = 'last_activity';
+let boardSortDir = localStorage.getItem('boardSortDir') || 'desc'; // 'asc', 'desc'
+let boardTitleClamp = localStorage.getItem('boardTitleClamp') || '3'; // '1', '2', '3', 'none'
+let boardCardLayout = localStorage.getItem('boardCardLayout') || 'standard'; // 'standard', 'stacked'
+let boardGroupPref = localStorage.getItem('boardGroupPref') || 'none'; // 'none', 'organization', 'location'
 let currentCalendarDate = new Date();
 
 let jobs = [];
@@ -343,10 +347,7 @@ function applyActiveTheme() {
       root.style.setProperty('--theme-primary', theme.primary_color);
       root.style.setProperty('--theme-secondary', theme.secondary_color);
       root.style.setProperty('--theme-background', theme.background_color);
-      root.style.setProperty('--theme-card-bg', theme.is_dark 
-        ? 'rgba(30, 41, 59, 0.7)' 
-        : 'rgba(255, 255, 255, 0.75)'
-      );
+      root.style.setProperty('--theme-card-bg', theme.card_background_color);
       root.style.setProperty('--theme-text', theme.text_color);
       root.style.setProperty('--theme-text-muted', theme.is_dark ? '#94a3b8' : '#64748b');
       root.style.setProperty('--theme-border', theme.border_color);
@@ -631,24 +632,26 @@ function renderKanbanFilters() {
 
 function getSortedJobs(jobList) {
   const sortPref = boardSortPref;
+  const dirMultiplier = (boardSortDir === 'asc') ? -1 : 1;
+  
   return [...jobList].sort((a, b) => {
     if (sortPref === 'last_activity') {
-      return new Date(b.last_activity) - new Date(a.last_activity);
+      return (new Date(b.last_activity) - new Date(a.last_activity)) * dirMultiplier;
     } else if (sortPref === 'date_added') {
-      return new Date(b.created_at) - new Date(a.created_at);
+      return (new Date(b.created_at) - new Date(a.created_at)) * dirMultiplier;
     } else if (sortPref === 'salary') {
       const valA = parseInt(a.salary_range ? a.salary_range.replace(/[^0-9]/g, '') : '0', 10);
       const valB = parseInt(b.salary_range ? b.salary_range.replace(/[^0-9]/g, '') : '0', 10);
-      return valB - valA;
+      return (valB - valA) * dirMultiplier;
     } else if (sortPref === 'location') {
       const locA = (a.location && a.location.trim() !== '' && a.location !== 'None') ? a.location.toLowerCase() : 'zzz';
       const locB = (b.location && b.location.trim() !== '' && b.location !== 'None') ? b.location.toLowerCase() : 'zzz';
-      return locA.localeCompare(locB);
+      return locA.localeCompare(locB) * -dirMultiplier;
     } else if (sortPref === 'remote_first') {
       if (a.remote !== b.remote) {
-        return (b.remote || 0) - (a.remote || 0);
+        return ((b.remote || 0) - (a.remote || 0)) * dirMultiplier;
       }
-      return new Date(b.last_activity) - new Date(a.last_activity);
+      return (new Date(b.last_activity) - new Date(a.last_activity)) * dirMultiplier;
     }
     return 0;
   });
@@ -665,52 +668,163 @@ function renderJobCardHTML(job) {
     <div class="job-card" onclick="openJobDetailModal(${job.id})" style="--card-border-hover: ${job.status_color}">
       <div class="job-card-accent" style="background-color: ${job.status_color}"></div>
       
-      ${isStale ? `
-        <div class="badge-stale" style="display: inline-flex; align-items: center; gap: 4px; width: fit-content; margin-bottom: 4px;">
-          <span>⚠️</span>
-          <span>STALE - Inactive</span>
-        </div>
-      ` : ''}
-
-      <div class="job-card-title">${escapeHTML(job.title)}</div>
-      <div class="job-card-org">${escapeHTML(job.organization_name)}</div>
+      <div class="job-card-main-info">
+        <div class="job-card-title">${escapeHTML(job.title)}</div>
+        <div class="job-card-org">${escapeHTML(job.organization_name)}</div>
+      </div>
       
-      ${(job.remote || (job.location && job.location.trim() !== '' && job.location !== 'None')) ? `
-        <div class="job-card-org" style="font-size: 11px; color: var(--theme-text-muted); margin-top: 2px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
-          ${job.remote ? `<span style="background: rgba(99, 102, 241, 0.2); color: #818cf8; border: 1px solid rgba(99, 102, 241, 0.4); padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 600;">☁️ Remote</span>` : ''}
-          ${(job.location && job.location.trim() !== '' && job.location !== 'None') ? `<span>📍 ${escapeHTML(job.location)}</span>` : ''}
-        </div>
-      ` : ''}
-      
-      ${hasSalary ? `
-        <div class="job-card-org" style="font-size: 12px; color: var(--theme-text-muted); margin-top: 2px;">
-          <span style="color: #10b981; margin-right: 4px;">💵</span>
-          <span>${escapeHTML(job.salary_range)}</span>
-        </div>
-      ` : ''}
-
-      ${endDate ? `
-        <div class="job-card-org" style="font-size: 11px; color: #fb7185; margin-top: 2px;">
-          <span style="margin-right: 4px;">⏳</span>
-          <span>Closes: ${endDate}</span>
-        </div>
-      ` : ''}
-
-      <div class="job-card-footer">
-        ${(job.requisition_id && job.requisition_id !== 'None') ? `
-          <div style="display: flex; align-items: center; gap: 4px;">
-            <span>🆔</span>
-            <span>Req ID: ${escapeHTML(job.requisition_id)}</span>
+      <div class="job-card-extra-details">
+        ${isStale ? `
+          <div class="badge-stale" style="display: inline-flex; align-items: center; gap: 4px; width: fit-content; margin-bottom: 4px;">
+            <span>⚠️</span>
+            <span>STALE - Inactive</span>
           </div>
         ` : ''}
+
+        ${(job.remote || (job.location && job.location.trim() !== '' && job.location !== 'None')) ? `
+          <div class="job-card-org" style="color: var(--theme-text-muted); display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+            ${job.remote ? `<span style="background: rgba(99, 102, 241, 0.2); color: #818cf8; border: 1px solid rgba(99, 102, 241, 0.4); padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 600;">☁️ Remote</span>` : ''}
+            ${(job.location && job.location.trim() !== '' && job.location !== 'None') ? `<span>${escapeHTML(job.location)}</span>` : ''}
+          </div>
+        ` : ''}
+        
+        ${hasSalary ? `
+          <div class="job-card-org" style="color: var(--theme-text-muted);">
+            <span>${escapeHTML(job.salary_range)}</span>
+          </div>
+        ` : ''}
+
+        ${endDate ? `
+          <div class="job-card-org" style="color: #fb7185;">
+            <span style="margin-right: 4px;">⏳</span>
+            <span>Closes: ${endDate}</span>
+          </div>
+        ` : ''}
+
+        <div class="job-card-footer" style="display: flex; flex-direction: column; align-items: flex-start; gap: 4px;">
+          <div style="display: flex; align-items: center; gap: 4px;">
+            <span>Req ID: ${(!job.requisition_id || job.requisition_id.trim() === '' || job.requisition_id === 'None') ? 'None' : escapeHTML(job.requisition_id)}</span>
+          </div>
+          ${job.target_url ? `
+            <a href="${job.target_url}" target="_blank" rel="noopener noreferrer" class="job-card-link" onclick="event.stopPropagation();" style="font-size: 12px; color: var(--theme-primary); text-decoration: underline; display: flex; align-items: center; gap: 4px;">
+              <span>Job Posting</span>
+            </a>
+          ` : ''}
+        </div>
       </div>
     </div>
   `;
 }
 
+function getCardListHTML(sortedJobs) {
+  if (sortedJobs.length === 0) {
+    return `
+      <div style="color: var(--theme-text-muted); font-size: 12px; text-align: center; padding: 24px 0; border: 1px dashed var(--theme-border); border-radius: var(--radius-md);">
+        No applications
+      </div>
+    `;
+  }
+
+  if (boardGroupPref === 'none') {
+    return `
+      <div class="card-list">
+        ${sortedJobs.map(job => renderJobCardHTML(job)).join('')}
+      </div>
+    `;
+  }
+
+  // Group jobs
+  const groups = {};
+  sortedJobs.forEach(job => {
+    let key = '';
+    if (boardGroupPref === 'organization') {
+      key = job.organization_name;
+    } else if (boardGroupPref === 'location') {
+      key = (job.remote === 1) ? 'Remote' : (job.location && job.location !== 'None' ? job.location : 'Unknown Location');
+    } else if (boardGroupPref === 'status') {
+      key = job.status_label || 'Unknown Status';
+    }
+    
+    if (!groups[key]) {
+      groups[key] = [];
+    }
+    groups[key].push(job);
+  });
+
+  const keys = Object.keys(groups).sort((keyA, keyB) => {
+    if (boardGroupPref === 'status') {
+      const statusA = statuses.find(s => s.label === keyA);
+      const statusB = statuses.find(s => s.label === keyB);
+      if (statusA && statusB) {
+        return statusA.sort_order - statusB.sort_order;
+      }
+    }
+    return keyA.localeCompare(keyB);
+  });
+
+  let html = '';
+  keys.forEach(key => {
+    const groupJobs = groups[key];
+    let groupLabel = '';
+    if (boardGroupPref === 'organization') {
+      groupLabel = `🏢 ${key}`;
+    } else if (boardGroupPref === 'location') {
+      groupLabel = `📍 ${key}`;
+    } else if (boardGroupPref === 'status') {
+      groupLabel = `🏷️ ${key}`;
+    }
+
+    html += `
+      <div class="card-group-stack" style="margin-bottom: 20px;">
+        <div class="card-group-header" style="font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--theme-text-muted); margin-bottom: 6px; letter-spacing: 0.5px; display: flex; align-items: center; justify-content: space-between;">
+          <span>${escapeHTML(groupLabel)}</span>
+          <span style="opacity: 0.6; font-size: 10px;">(${groupJobs.length})</span>
+        </div>
+        <div class="card-list">
+          ${groupJobs.map(job => renderJobCardHTML(job)).join('')}
+        </div>
+      </div>
+    `;
+  });
+  return html;
+}
+
+function adjustStackedDeckSpacing() {
+  if (boardCardLayout !== 'stacked') return;
+
+  const cards = document.querySelectorAll('.layout-stacked .job-card');
+  cards.forEach(card => {
+    const cardList = card.parentElement;
+    if (cardList && cardList.lastElementChild === card) {
+      card.style.marginBottom = ''; // CSS :last-child !important overrides
+      return;
+    }
+
+    const mainInfo = card.querySelector('.job-card-main-info');
+    if (mainInfo) {
+      const mainInfoHeight = mainInfo.offsetHeight;
+      // top padding (12px) + main info height + extra safety buffer (5px)
+      const visibleHeight = 12 + mainInfoHeight + 5;
+      const fullHeight = card.offsetHeight;
+      const offset = fullHeight - visibleHeight;
+      card.style.marginBottom = `-${offset}px`;
+    }
+  });
+}
+
 function renderKanbanBoard() {
   const container = document.getElementById('kanban-container');
+  if (!container) return;
   container.innerHTML = '';
+
+  // Apply visual layout options
+  container.classList.remove('clamp-title-1', 'clamp-title-2', 'clamp-title-3', 'clamp-title-none');
+  container.classList.add(`clamp-title-${boardTitleClamp}`);
+  if (boardCardLayout === 'stacked') {
+    container.classList.add('layout-stacked');
+  } else {
+    container.classList.remove('layout-stacked');
+  }
 
   let visibleJobs = jobs.filter(job => !filterStatuses.includes(job.status_id));
 
@@ -733,14 +847,7 @@ function renderKanbanBoard() {
       const colDiv = document.createElement('div');
       colDiv.className = 'kanban-column';
       
-      let cardsHTML = sortedJobs.map(job => renderJobCardHTML(job)).join('');
-      if (sortedJobs.length === 0) {
-        cardsHTML = `
-          <div style="color: var(--theme-text-muted); font-size: 12px; text-align: center; padding: 24px 0; border: 1px dashed var(--theme-border); border-radius: var(--radius-md);">
-            No applications
-          </div>
-        `;
-      }
+      let cardsHTML = getCardListHTML(sortedJobs);
 
       colDiv.innerHTML = `
         <div class="column-header">
@@ -750,9 +857,7 @@ function renderKanbanBoard() {
           </div>
           <span class="column-count">${colJobs.length}</span>
         </div>
-        <div class="card-list">
-          ${cardsHTML}
-        </div>
+        ${cardsHTML}
       `;
       container.appendChild(colDiv);
     });
@@ -771,18 +876,12 @@ function renderKanbanBoard() {
 
     companies.forEach(company => {
       const colJobs = visibleJobs.filter(j => j.organization_name === company);
-      // Sort inside company columns by status hierarchy order value
-      const sortedJobs = [...colJobs].sort((a, b) => {
-        if (a.status_sort_order !== b.status_sort_order) {
-          return a.status_sort_order - b.status_sort_order;
-        }
-        return new Date(b.last_activity) - new Date(a.last_activity);
-      });
+      const sortedJobs = getSortedJobs(colJobs);
 
       const colDiv = document.createElement('div');
       colDiv.className = 'kanban-column';
 
-      const cardsHTML = sortedJobs.map(job => renderJobCardHTML(job)).join('');
+      const cardsHTML = getCardListHTML(sortedJobs);
 
       colDiv.innerHTML = `
         <div class="column-header">
@@ -792,13 +891,14 @@ function renderKanbanBoard() {
           </div>
           <span class="column-count">${colJobs.length}</span>
         </div>
-        <div class="card-list">
-          ${cardsHTML}
-        </div>
+        ${cardsHTML}
       `;
       container.appendChild(colDiv);
     });
   }
+
+  // Dynamically calculate overlap margins based on each card's actual title/org height
+  adjustStackedDeckSpacing();
 }
 
 // Bind Kanban Controls
@@ -909,7 +1009,7 @@ async function renderMonthGrid() {
       <div class="month-grid">
         ${weekdays.map(day => `<div class="day-header">${day}</div>`).join('')}
       </div>
-      <div class="month-grid">
+      <div class="month-grid month-grid-cells">
   `;
 
   cells.forEach((cell, idx) => {
@@ -2882,6 +2982,52 @@ document.addEventListener('DOMContentLoaded', () => {
     boardSortSelect.addEventListener('change', (e) => {
       boardSortPref = e.target.value;
       boardSortSelect.dataset.userChanged = 'true';
+      renderKanbanBoard();
+    });
+  }
+
+  const sortDirArrow = document.getElementById('sort-dir-arrow');
+  if (sortDirArrow) {
+    sortDirArrow.textContent = boardSortDir === 'asc' ? '↑' : '↓';
+  }
+  const sortDirToggle = document.getElementById('btn-sort-dir-toggle');
+  if (sortDirToggle) {
+    sortDirToggle.addEventListener('click', () => {
+      boardSortDir = boardSortDir === 'desc' ? 'asc' : 'desc';
+      localStorage.setItem('boardSortDir', boardSortDir);
+      if (sortDirArrow) {
+        sortDirArrow.textContent = boardSortDir === 'asc' ? '↑' : '↓';
+      }
+      renderKanbanBoard();
+    });
+  }
+
+  const clampSelect = document.getElementById('board-title-clamp-select');
+  if (clampSelect) {
+    clampSelect.value = boardTitleClamp;
+    clampSelect.addEventListener('change', (e) => {
+      boardTitleClamp = e.target.value;
+      localStorage.setItem('boardTitleClamp', boardTitleClamp);
+      renderKanbanBoard();
+    });
+  }
+
+  const cardLayoutSelect = document.getElementById('board-card-layout-select');
+  if (cardLayoutSelect) {
+    cardLayoutSelect.value = boardCardLayout;
+    cardLayoutSelect.addEventListener('change', (e) => {
+      boardCardLayout = e.target.value;
+      localStorage.setItem('boardCardLayout', boardCardLayout);
+      renderKanbanBoard();
+    });
+  }
+
+  const groupSelect = document.getElementById('board-group-select');
+  if (groupSelect) {
+    groupSelect.value = boardGroupPref;
+    groupSelect.addEventListener('change', (e) => {
+      boardGroupPref = e.target.value;
+      localStorage.setItem('boardGroupPref', boardGroupPref);
       renderKanbanBoard();
     });
   }

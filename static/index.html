@@ -38,6 +38,14 @@
           <span>Settings</span>
         </button>
       </div>
+      
+      <!-- Developer Credit Footer -->
+      <div class="sidebar-footer" style="margin-top: auto; padding-top: 16px; border-top: 1px solid var(--theme-border); font-size: 11px; color: var(--theme-text-muted); text-align: center; line-height: 1.4; width: 100%;">
+        <span>Developed by</span><br>
+        <strong style="color: var(--theme-primary); font-weight: 600;">NoProfessional582</strong><br>
+        <span>with Antigravity AI</span><br>
+        <a href="https://github.com/NoProfessional582/Job-Tracker/" target="_blank" rel="noopener noreferrer" style="color: var(--theme-primary); text-decoration: underline; margin-top: 4px; display: inline-block;">GitHub Repo</a>
+      </div>
     </nav>
 
     <!-- Main Panel content -->
@@ -84,7 +92,7 @@
 
       <!-- 1. Job Board View -->
       <div id="panel-kanban" class="view-panel active">
-        <div style="display: flex; flex-direction: column; gap: 20px;">
+        <div style="display: flex; flex-direction: column; gap: 20px; height: 100%; min-height: 0;">
           
           <!-- Board Controls -->
           <div class="board-controls" style="display: flex; flex-direction: column; gap: 16px; align-items: stretch;">
@@ -101,16 +109,49 @@
                 </button>
               </div>
 
-              <!-- Sorting Dropdown directly on the board -->
-              <div style="display: flex; align-items: center; gap: 8px;">
-                <label for="board-sort-select" style="font-size: 13px; font-weight: 600; color: var(--theme-text-muted);">⇅ Sort:</label>
-                <select id="board-sort-select" style="padding: 6px 12px; font-size: 13px; border-radius: var(--radius-sm); background: rgba(0, 0, 0, 0.15); color: var(--theme-text); border: 1px solid var(--theme-border); cursor: pointer;">
-                  <option value="last_activity">Last Activity</option>
-                  <option value="date_added">Date Added</option>
-                  <option value="salary">Salary (High to Low)</option>
-                  <option value="location">Location (A to Z)</option>
-                  <option value="remote_first">Remote First</option>
-                </select>
+              <!-- Sorting & Visual Board Controls -->
+              <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <span id="btn-sort-dir-toggle" style="cursor: pointer; user-select: none; font-size: 14px; color: var(--theme-primary); display: inline-flex; align-items: center; padding: 2px 4px; background: rgba(255, 255, 255, 0.05); border: 1px solid var(--theme-border); border-radius: var(--radius-sm);" title="Toggle Sort Direction">
+                    <span id="sort-dir-arrow">↓</span>
+                  </span>
+                  <label for="board-sort-select" style="font-size: 13px; font-weight: 600; color: var(--theme-text-muted); cursor: pointer;">Sort:</label>
+                  <select id="board-sort-select" style="padding: 6px 12px; font-size: 13px; border-radius: var(--radius-sm); background: rgba(0, 0, 0, 0.15); color: var(--theme-text); border: 1px solid var(--theme-border); cursor: pointer;">
+                    <option value="last_activity">Last Activity</option>
+                    <option value="date_added">Date Added</option>
+                    <option value="salary">Salary (High to Low)</option>
+                    <option value="location">Location (A to Z)</option>
+                    <option value="remote_first">Remote First</option>
+                  </select>
+                </div>
+
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <label for="board-title-clamp-select" style="font-size: 13px; font-weight: 600; color: var(--theme-text-muted);">Title Lines:</label>
+                  <select id="board-title-clamp-select" style="padding: 6px 12px; font-size: 13px; border-radius: var(--radius-sm); background: rgba(0, 0, 0, 0.15); color: var(--theme-text); border: 1px solid var(--theme-border); cursor: pointer;">
+                    <option value="1">1 Line</option>
+                    <option value="2">2 Lines</option>
+                    <option value="3">3 Lines</option>
+                    <option value="none">No Limit</option>
+                  </select>
+                </div>
+
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <label for="board-card-layout-select" style="font-size: 13px; font-weight: 600; color: var(--theme-text-muted);">Tile Display:</label>
+                  <select id="board-card-layout-select" style="padding: 6px 12px; font-size: 13px; border-radius: var(--radius-sm); background: rgba(0, 0, 0, 0.15); color: var(--theme-text); border: 1px solid var(--theme-border); cursor: pointer;">
+                    <option value="standard">Standard</option>
+                    <option value="stacked">Stacked Deck</option>
+                  </select>
+                </div>
+
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <label for="board-group-select" style="font-size: 13px; font-weight: 600; color: var(--theme-text-muted);">Group By:</label>
+                  <select id="board-group-select" style="padding: 6px 12px; font-size: 13px; border-radius: var(--radius-sm); background: rgba(0, 0, 0, 0.15); color: var(--theme-text); border: 1px solid var(--theme-border); cursor: pointer;">
+                    <option value="none">None</option>
+                    <option value="organization">Organization</option>
+                    <option value="location">Location</option>
+                    <option value="status">Status</option>
+                  </select>
+                </div>
               </div>
             </div>
 
