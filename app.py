@@ -90,6 +90,7 @@ def init_db():
             snoozed_until DATETIME,
             remote INTEGER DEFAULT 0,
             location TEXT,
+            requisition_id TEXT,
             FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
             FOREIGN KEY (status_id) REFERENCES statuses(id)
         );
@@ -203,6 +204,13 @@ def init_db():
             print("Migrated database: added location to jobs.")
         except Exception as e:
             print("Migration warning (location):", e)
+
+    if 'requisition_id' not in job_columns:
+        try:
+            cursor.execute("ALTER TABLE jobs ADD COLUMN requisition_id TEXT")
+            print("Migrated database: added requisition_id to jobs.")
+        except Exception as e:
+            print("Migration warning (requisition_id):", e)
 
     # Ensure acknowledged_notifications table exists for existing databases
     try:
@@ -699,17 +707,18 @@ def create_job():
     preferred_experience = clean_field(data.get('preferred_experience'))
     location = clean_field(data.get('location'))
     remote = 1 if data.get('remote') else 0
+    requisition_id = clean_field(data.get('requisition_id'))
 
     job_id = db_execute("""
          INSERT INTO jobs (
              organization_id, status_id, title, posted_date, end_date, salary_range, 
              other_compensation, description, required_experience, preferred_experience, target_url,
-             remote, location
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             remote, location, requisition_id
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      """, (
          org_id, status_id, data['title'], data.get('posted_date'), data.get('end_date'), salary_range,
          other_compensation, description, required_experience, preferred_experience, data.get('target_url'),
-         remote, location
+         remote, location, requisition_id
      ))
     
     return jsonify({"id": job_id, "title": data['title']}), 201
@@ -758,6 +767,7 @@ def update_job(id):
     preferred_experience = clean_field_update('preferred_experience', current['preferred_experience'])
     location = clean_field_update('location', current['location'])
     remote = 1 if data.get('remote') else 0 if 'remote' in data else current['remote']
+    requisition_id = clean_field_update('requisition_id', current['requisition_id'])
 
     db_execute("""
          UPDATE jobs 
@@ -775,13 +785,14 @@ def update_job(id):
              target_url = ?,
              remote = ?,
              location = ?,
+             requisition_id = ?,
              updated_at = datetime('now')
          WHERE id = ?
      """, (
          org_id, data.get('status_id'), data.get('title'), data.get('posted_date'),
          data.get('end_date'), salary_range, other_compensation,
          description, required_experience, preferred_experience,
-         data.get('target_url'), remote, location, id
+         data.get('target_url'), remote, location, requisition_id, id
      ))
     return jsonify({"message": "Job updated"})
 

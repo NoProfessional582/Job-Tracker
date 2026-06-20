@@ -26,6 +26,57 @@ let isEditMode = false;
 let expandedDayStr = null; // Calendar month overflow day date string
 let jobIdToDelete = null;
 
+function parseAndFormatSalary(val) {
+  if (!val) return '';
+  const trimmed = val.trim();
+  if (!trimmed) return '';
+
+  // Helper to parse a single number string (e.g. "120k", "120,000.00", "$120", "120k+")
+  function parseSingleNumber(str) {
+    if (!str) return null;
+    let cleanStr = str.replace(/[$\s,]/g, ''); // Remove $, commas, spaces
+    cleanStr = cleanStr.replace(/\+$/, '');     // Remove trailing '+' signs (e.g. 120k+)
+    
+    let multiplier = 1;
+    if (cleanStr.toLowerCase().endsWith('k')) {
+      multiplier = 1000;
+      cleanStr = cleanStr.slice(0, -1);
+    }
+    const parsed = parseFloat(cleanStr);
+    return isNaN(parsed) ? null : Math.round(parsed * multiplier);
+  }
+
+  // Split input string on range separators: "-", "to", "until", "through", "and"
+  const parts = trimmed.split(/\s+(?:to|until|through|and|-)\s+|\s*-\s*/i);
+
+  if (parts.length === 2) {
+    const num1 = parseSingleNumber(parts[0]);
+    const num2 = parseSingleNumber(parts[1]);
+    if (num1 !== null && num2 !== null) {
+      return `$${num1.toLocaleString()} - $${num2.toLocaleString()}`;
+    }
+  } else if (parts.length === 1) {
+    // Check if the single string itself contains a hyphen without surrounding spaces (e.g. "120k-150k")
+    const subParts = trimmed.split('-');
+    if (subParts.length === 2) {
+      const num1 = parseSingleNumber(subParts[0]);
+      const num2 = parseSingleNumber(subParts[1]);
+      if (num1 !== null && num2 !== null) {
+        return `$${num1.toLocaleString()} - $${num2.toLocaleString()}`;
+      }
+    }
+
+    // Try parsing as a single number
+    const num = parseSingleNumber(trimmed);
+    if (num !== null) {
+      return `$${num.toLocaleString()}`;
+    }
+  }
+
+  // Fallback to original input text if it's non-numeric (e.g. "Competitive", "DOE")
+  return trimmed;
+}
+
 // Format date string (YYYY-MM-DD) locally to prevent timezone shift issues
 function formatLocalDate(dateStr) {
   if (!dateStr) return '';
@@ -646,11 +697,12 @@ function renderJobCardHTML(job) {
       ` : ''}
 
       <div class="job-card-footer">
-        <div style="display: flex; align-items: center; gap: 4px;">
-          <span>📅</span>
-          <span>Posted: ${postDate}</span>
-        </div>
-        <span style="opacity: 0.8;">Act: ${actDate}</span>
+        ${(job.requisition_id && job.requisition_id !== 'None') ? `
+          <div style="display: flex; align-items: center; gap: 4px;">
+            <span>🆔</span>
+            <span>Req ID: ${escapeHTML(job.requisition_id)}</span>
+          </div>
+        ` : ''}
       </div>
     </div>
   `;
@@ -1670,7 +1722,8 @@ document.getElementById('add-job-form').addEventListener('submit', async (e) => 
     required_experience: document.getElementById('job-req').value.trim() || null,
     preferred_experience: document.getElementById('job-pref').value.trim() || null,
     location: document.getElementById('job-location').value.trim() || null,
-    remote: document.getElementById('job-remote').checked ? 1 : 0
+    remote: document.getElementById('job-remote').checked ? 1 : 0,
+    requisition_id: document.getElementById('job-req-id').value.trim() || null
   };
 
   if (body.posted_date && body.end_date && body.end_date <= body.posted_date) {
@@ -1767,8 +1820,11 @@ async function renderDetailModalContent() {
               <h2>${escapeHTML(job.title)}</h2>
               <div class="detail-org">
                 <span>at ${escapeHTML(job.organization_name)}</span>
+                ${(job.requisition_id && job.requisition_id !== 'None') ? `
+                  <span style="background: rgba(251, 191, 36, 0.15); color: #fbbf24; border: 1px solid rgba(251, 191, 36, 0.3); padding: 1px 6px; border-radius: 4px; font-size: 11px; font-weight: 600; margin-left: 8px;">Req ID: ${escapeHTML(job.requisition_id)}</span>
+                ` : ''}
                 ${job.target_url ? `
-                  <a href="${job.target_url}" target="_blank" rel="noopener noreferrer" style="font-size: 14px; color: var(--theme-primary); text-decoration: underline;">
+                  <a href="${job.target_url}" target="_blank" rel="noopener noreferrer" style="font-size: 14px; color: var(--theme-primary); text-decoration: underline; margin-left: 8px;">
                     View Job Post
                   </a>
                 ` : ''}
@@ -2079,6 +2135,10 @@ async function renderDetailModalContent() {
                 <label for="edit-url">Target Job Posting URL</label>
                 <input type="url" id="edit-url" value="${escapeHTML(job.target_url || '')}" placeholder="https://careers.company.com/job/...">
               </div>
+              <div class="form-group" style="margin-bottom: 0;">
+                <label for="edit-req-id">Requisition ID</label>
+                <input type="text" id="edit-req-id" value="${escapeHTML(job.requisition_id && job.requisition_id !== 'None' ? job.requisition_id : '')}" placeholder="e.g. REQ-12345">
+              </div>
               <div style="display: flex; gap: 16px;">
                 <div class="form-group" style="margin-bottom: 0; flex: 1;">
                   <label for="edit-posted">Posted Date</label>
@@ -2369,7 +2429,8 @@ window.saveJobDetailsEdit = async (e, jobId) => {
     required_experience: document.getElementById('edit-req').value.trim() || null,
     preferred_experience: document.getElementById('edit-pref').value.trim() || null,
     location: document.getElementById('edit-location').value.trim() || null,
-    remote: document.getElementById('edit-remote').checked ? 1 : 0
+    remote: document.getElementById('edit-remote').checked ? 1 : 0,
+    requisition_id: document.getElementById('edit-req-id').value.trim() || null
   };
 
   if (body.posted_date && body.end_date && body.end_date <= body.posted_date) {
@@ -2384,6 +2445,7 @@ window.saveJobDetailsEdit = async (e, jobId) => {
       body: JSON.stringify(body)
     });
     isEditMode = false;
+    await fetchDashboardData();
     openJobDetailModal(jobId);
   } catch (err) {
     showToast(err.message, 'error');
@@ -2839,6 +2901,13 @@ document.addEventListener('DOMContentLoaded', () => {
       renderKanbanBoard();
     });
   }
+
+  // Bind focusout event delegation for salary auto-formatting
+  document.addEventListener('focusout', (e) => {
+    if (e.target && (e.target.id === 'job-salary' || e.target.id === 'edit-salary')) {
+      e.target.value = parseAndFormatSalary(e.target.value);
+    }
+  });
 
   // Bind form submit for edit event
   const editEventForm = document.getElementById('edit-event-form');
