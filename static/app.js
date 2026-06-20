@@ -3,6 +3,9 @@ let activeTab = 'kanban'; // 'kanban', 'calendar', 'settings'
 let kanbanViewMode = 'pipeline'; // 'pipeline', 'organization'
 let calendarViewMode = 'month'; // 'month', 'week'
 let filterStatuses = []; // Hidden status IDs
+let filterLocation = '';
+let filterRemoteOnly = false;
+let boardSortPref = 'last_activity';
 let currentCalendarDate = new Date();
 
 let jobs = [];
@@ -214,6 +217,12 @@ async function fetchDashboardData() {
     staleJobs = alertsData;
     eventTypes = eventTypesData;
     timezones = timezonesData;
+
+    const boardSortSelect = document.getElementById('board-sort-select');
+    if (boardSortSelect && !boardSortSelect.dataset.userChanged) {
+      boardSortPref = settings.kanban_default_sort || 'last_activity';
+      boardSortSelect.value = boardSortPref;
+    }
 
     applyActiveTheme();
     renderAlertsBanner();
@@ -570,7 +579,7 @@ function renderKanbanFilters() {
 }
 
 function getSortedJobs(jobList) {
-  const sortPref = settings.kanban_default_sort || 'last_activity';
+  const sortPref = boardSortPref;
   return [...jobList].sort((a, b) => {
     if (sortPref === 'last_activity') {
       return new Date(b.last_activity) - new Date(a.last_activity);
@@ -580,6 +589,15 @@ function getSortedJobs(jobList) {
       const valA = parseInt(a.salary_range ? a.salary_range.replace(/[^0-9]/g, '') : '0', 10);
       const valB = parseInt(b.salary_range ? b.salary_range.replace(/[^0-9]/g, '') : '0', 10);
       return valB - valA;
+    } else if (sortPref === 'location') {
+      const locA = (a.location && a.location.trim() !== '' && a.location !== 'None') ? a.location.toLowerCase() : 'zzz';
+      const locB = (b.location && b.location.trim() !== '' && b.location !== 'None') ? b.location.toLowerCase() : 'zzz';
+      return locA.localeCompare(locB);
+    } else if (sortPref === 'remote_first') {
+      if (a.remote !== b.remote) {
+        return (b.remote || 0) - (a.remote || 0);
+      }
+      return new Date(b.last_activity) - new Date(a.last_activity);
     }
     return 0;
   });
@@ -605,6 +623,13 @@ function renderJobCardHTML(job) {
 
       <div class="job-card-title">${escapeHTML(job.title)}</div>
       <div class="job-card-org">${escapeHTML(job.organization_name)}</div>
+      
+      ${(job.remote || (job.location && job.location.trim() !== '' && job.location !== 'None')) ? `
+        <div class="job-card-org" style="font-size: 11px; color: var(--theme-text-muted); margin-top: 2px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+          ${job.remote ? `<span style="background: rgba(99, 102, 241, 0.2); color: #818cf8; border: 1px solid rgba(99, 102, 241, 0.4); padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 600;">☁️ Remote</span>` : ''}
+          ${(job.location && job.location.trim() !== '' && job.location !== 'None') ? `<span>📍 ${escapeHTML(job.location)}</span>` : ''}
+        </div>
+      ` : ''}
       
       ${hasSalary ? `
         <div class="job-card-org" style="font-size: 12px; color: var(--theme-text-muted); margin-top: 2px;">
@@ -635,7 +660,17 @@ function renderKanbanBoard() {
   const container = document.getElementById('kanban-container');
   container.innerHTML = '';
 
-  const visibleJobs = jobs.filter(job => !filterStatuses.includes(job.status_id));
+  let visibleJobs = jobs.filter(job => !filterStatuses.includes(job.status_id));
+
+  // Filter by Remote
+  if (filterRemoteOnly) {
+    visibleJobs = visibleJobs.filter(job => job.remote === 1);
+  }
+
+  // Filter by Location
+  if (filterLocation) {
+    visibleJobs = visibleJobs.filter(job => job.location && job.location.toLowerCase().includes(filterLocation));
+  }
 
   if (kanbanViewMode === 'pipeline') {
     // 1. Pipeline Status Columns
@@ -1633,7 +1668,9 @@ document.getElementById('add-job-form').addEventListener('submit', async (e) => 
     target_url: document.getElementById('job-url').value.trim() || null,
     description: document.getElementById('job-desc').value.trim() || null,
     required_experience: document.getElementById('job-req').value.trim() || null,
-    preferred_experience: document.getElementById('job-pref').value.trim() || null
+    preferred_experience: document.getElementById('job-pref').value.trim() || null,
+    location: document.getElementById('job-location').value.trim() || null,
+    remote: document.getElementById('job-remote').checked ? 1 : 0
   };
 
   if (body.posted_date && body.end_date && body.end_date <= body.posted_date) {
@@ -1736,9 +1773,11 @@ async function renderDetailModalContent() {
                   </a>
                 ` : ''}
               </div>
-              <div style="display: flex; gap: 16px; margin-top: 8px; font-size: 13px; color: var(--theme-text-muted);">
+              <div style="display: flex; gap: 16px; margin-top: 8px; font-size: 13px; color: var(--theme-text-muted); flex-wrap: wrap; align-items: center;">
                 ${job.posted_date ? `<span><strong>Posted:</strong> ${formatLocalDate(job.posted_date)}</span>` : ''}
                 ${job.end_date ? `<span style="color: #fb7185; display: inline-flex; align-items: center; gap: 4px;"><strong>Closes:</strong> ${formatLocalDate(job.end_date)}</span>` : ''}
+                ${job.remote ? `<span style="background: rgba(99, 102, 241, 0.2); color: #818cf8; border: 1px solid rgba(99, 102, 241, 0.4); padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 600;">☁️ Remote</span>` : ''}
+                ${(job.location && job.location.trim() !== '' && job.location !== 'None') ? `<span><strong>Location:</strong> 📍 ${escapeHTML(job.location)}</span>` : ''}
               </div>
             </div>
             
@@ -2058,6 +2097,16 @@ async function renderDetailModalContent() {
                   `).join('')}
                 </select>
               </div>
+              <div class="form-group" style="margin-bottom: 0;">
+                <label for="edit-location">Location</label>
+                <input type="text" id="edit-location" value="${escapeHTML(job.location && job.location !== 'None' ? job.location : '')}" placeholder="e.g. San Francisco, CA">
+              </div>
+              <div class="form-group" style="margin-bottom: 0; justify-content: center;">
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 14px; font-weight: 500; margin-top: 8px;">
+                  <input type="checkbox" id="edit-remote" ${job.remote ? 'checked' : ''} style="width: auto; cursor: pointer;">
+                  Remote position?
+                </label>
+              </div>
             </div>
             <!-- Right Column Stack -->
             <div style="display: flex; flex-direction: column; gap: 16px;">
@@ -2318,7 +2367,9 @@ window.saveJobDetailsEdit = async (e, jobId) => {
     other_compensation: document.getElementById('edit-comp').value.trim() || null,
     description: document.getElementById('edit-desc').value.trim() || null,
     required_experience: document.getElementById('edit-req').value.trim() || null,
-    preferred_experience: document.getElementById('edit-pref').value.trim() || null
+    preferred_experience: document.getElementById('edit-pref').value.trim() || null,
+    location: document.getElementById('edit-location').value.trim() || null,
+    remote: document.getElementById('edit-remote').checked ? 1 : 0
   };
 
   if (body.posted_date && body.end_date && body.end_date <= body.posted_date) {
@@ -2762,6 +2813,33 @@ function setupRichTextPasteInterceptors() {
 // --- App Load Bootstrap ---
 document.addEventListener('DOMContentLoaded', () => {
   setupRichTextPasteInterceptors();
+
+  // Bind board sorting and filtering listeners
+  const boardSortSelect = document.getElementById('board-sort-select');
+  if (boardSortSelect) {
+    boardSortSelect.addEventListener('change', (e) => {
+      boardSortPref = e.target.value;
+      boardSortSelect.dataset.userChanged = 'true';
+      renderKanbanBoard();
+    });
+  }
+
+  const filterLocationInput = document.getElementById('filter-location');
+  if (filterLocationInput) {
+    filterLocationInput.addEventListener('input', (e) => {
+      filterLocation = e.target.value.trim().toLowerCase();
+      renderKanbanBoard();
+    });
+  }
+
+  const filterRemoteCheckbox = document.getElementById('filter-remote-only');
+  if (filterRemoteCheckbox) {
+    filterRemoteCheckbox.addEventListener('change', (e) => {
+      filterRemoteOnly = e.target.checked;
+      renderKanbanBoard();
+    });
+  }
+
   // Bind form submit for edit event
   const editEventForm = document.getElementById('edit-event-form');
   if (editEventForm) {

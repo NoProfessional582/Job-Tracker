@@ -87,24 +87,56 @@
         <div style="display: flex; flex-direction: column; gap: 20px;">
           
           <!-- Board Controls -->
-          <div class="board-controls">
-            <div class="view-selector">
-              <button id="btn-view-pipeline" class="view-btn active">
-                <span>🥞</span>
-                <span>Pipeline View</span>
-              </button>
-              <button id="btn-view-org" class="view-btn">
-                <span>🏢</span>
-                <span>Organization View</span>
-              </button>
+          <div class="board-controls" style="display: flex; flex-direction: column; gap: 16px; align-items: stretch;">
+            <!-- First Row: Views & Sort -->
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;">
+              <div class="view-selector">
+                <button id="btn-view-pipeline" class="view-btn active">
+                  <span>🥞</span>
+                  <span>Pipeline View</span>
+                </button>
+                <button id="btn-view-org" class="view-btn">
+                  <span>🏢</span>
+                  <span>Organization View</span>
+                </button>
+              </div>
+
+              <!-- Sorting Dropdown directly on the board -->
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <label for="board-sort-select" style="font-size: 13px; font-weight: 600; color: var(--theme-text-muted);">⇅ Sort:</label>
+                <select id="board-sort-select" style="padding: 6px 12px; font-size: 13px; border-radius: var(--radius-sm); background: rgba(0, 0, 0, 0.15); color: var(--theme-text); border: 1px solid var(--theme-border); cursor: pointer;">
+                  <option value="last_activity">Last Activity</option>
+                  <option value="date_added">Date Added</option>
+                  <option value="salary">Salary (High to Low)</option>
+                  <option value="location">Location (A to Z)</option>
+                  <option value="remote_first">Remote First</option>
+                </select>
+              </div>
             </div>
-            
-            <div class="filter-menu">
-              <span style="font-size: 13px; font-weight: 600; color: var(--theme-text-muted); display: flex; align-items: center; gap: 4px;">
-                <span>👁️‍🗨️</span> Filter Columns:
-              </span>
-              <div id="filter-checkboxes-container" style="display: flex; gap: 8px; flex-wrap: wrap;">
-                <!-- Populated by JS -->
+
+            <!-- Second Row: Filters -->
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; border-top: 1px solid var(--theme-border); padding-top: 12px;">
+              <!-- Columns filter -->
+              <div class="filter-menu">
+                <span style="font-size: 13px; font-weight: 600; color: var(--theme-text-muted); display: flex; align-items: center; gap: 4px;">
+                  <span>👁️‍🗨️</span> Filter Columns:
+                </span>
+                <div id="filter-checkboxes-container" style="display: flex; gap: 8px; flex-wrap: wrap;">
+                  <!-- Populated by JS -->
+                </div>
+              </div>
+
+              <!-- Location & Remote filters -->
+              <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <label for="filter-location" style="font-size: 13px; font-weight: 600; color: var(--theme-text-muted);">📍 Location:</label>
+                  <input type="text" id="filter-location" placeholder="Filter by location..." style="padding: 6px 10px; font-size: 13px; border-radius: var(--radius-sm); background: rgba(0, 0, 0, 0.15); color: var(--theme-text); border: 1px solid var(--theme-border); width: 160px;">
+                </div>
+
+                <label style="display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--theme-text-muted); cursor: pointer;">
+                  <input type="checkbox" id="filter-remote-only" style="width: auto; cursor: pointer;">
+                  <span>☁️ Remote Only</span>
+                </label>
               </div>
             </div>
           </div>
@@ -393,6 +425,16 @@
                 <select id="job-status">
                   <!-- Populated by JS -->
                 </select>
+              </div>
+              <div class="form-group" style="margin-bottom: 0;">
+                <label for="job-location">Location</label>
+                <input type="text" id="job-location" placeholder="e.g. San Francisco, CA">
+              </div>
+              <div class="form-group" style="margin-bottom: 0; justify-content: center;">
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 14px; font-weight: 500; margin-top: 8px;">
+                  <input type="checkbox" id="job-remote" style="width: auto; cursor: pointer;">
+                  Remote position?
+                </label>
               </div>
             </div>
             <!-- Right Column Stack -->
