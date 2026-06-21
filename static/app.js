@@ -2894,22 +2894,41 @@ function setupRichTextPasteInterceptors() {
     const html = e.clipboardData.getData('text/html');
     if (!html) return; // Allow standard plain-text paste if HTML clipboard data is empty
 
-    // Sanitize the HTML string to strip script tags, inline event handlers, and javascript: links to prevent client-side XSS
-    const cleanHtml = html
-      .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-      .replace(/on\w+\s*=\s*"[^"]*"/g, '')
-      .replace(/on\w+\s*=\s*'[^']*'/g, '')
-      .replace(/href\s*=\s*"javascript:[^"]*"/gi, '')
-      .replace(/href\s*=\s*'javascript:[^']*'/gi, '');
-
+    // DOMParser creates an inert document — scripts are not executed.
+    // We sanitize at the DOM level (not regex) then extract only textContent
+    // into textarea.value, which is a text-only sink that cannot execute HTML.
     const parser = new DOMParser();
-    const doc = parser.parseFromString(cleanHtml, 'text/html');
+    const doc = parser.parseFromString(html, 'text/html');
+
+    // DOM-level sanitization: remove all dangerous elements from the inert document
+    const dangerousTags = ['script', 'style', 'iframe', 'object', 'embed', 'link', 'meta', 'noscript', 'form'];
+    dangerousTags.forEach(tag => {
+      doc.querySelectorAll(tag).forEach(el => el.remove());
+    });
+
+    // Remove all inline event handler attributes from every element
+    doc.querySelectorAll('*').forEach(el => {
+      const attrNames = el.getAttributeNames();
+      attrNames.forEach(name => {
+        if (name.toLowerCase().startsWith('on')) {
+          el.removeAttribute(name);
+        }
+      });
+      // Remove javascript: hrefs
+      if (el.hasAttribute('href') && el.getAttribute('href').trim().toLowerCase().startsWith('javascript:')) {
+        el.removeAttribute('href');
+      }
+      if (el.hasAttribute('src') && el.getAttribute('src').trim().toLowerCase().startsWith('javascript:')) {
+        el.removeAttribute('src');
+      }
+    });
 
     // If it contains bullet lists or block elements
     const hasStructure = doc.querySelector('li, ul, ol, p, br, div');
     if (!hasStructure) return;
 
-    // Helper function to recursively format nodes
+    // Helper function to recursively extract plain text from the sanitized inert DOM.
+    // Only .textContent is read from nodes — no HTML is ever inserted into the live document.
     function convertNodeToText(node) {
       let text = '';
       if (node.nodeType === Node.TEXT_NODE) {
@@ -2951,13 +2970,14 @@ function setupRichTextPasteInterceptors() {
         return '\n';
       }
 
-      // Default: process children
+      // Default: process children, extracting only text content
       node.childNodes.forEach(child => {
         text += convertNodeToText(child);
       });
       return text;
     }
 
+    // Extract plain text from the sanitized inert document body
     let formattedText = convertNodeToText(doc.body).trim();
     // Normalize line breaks
     formattedText = formattedText.replace(/\r\n/g, '\n');

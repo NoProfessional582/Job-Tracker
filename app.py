@@ -1,4 +1,5 @@
 import os
+import re
 import uuid
 import sqlite3
 from datetime import datetime, timedelta
@@ -945,11 +946,20 @@ def upload_file(id):
     ext = os.path.splitext(file.filename)[1].lower()
     if ext not in allowed_exts:
         return jsonify({"error": "Only .pdf and .docx files are allowed!"}), 400
-        
+
+    # Validate that the extension is a simple, safe pattern (letters/digits only)
+    if not re.match(r'^\.[a-z0-9]+$', ext):
+        return jsonify({"error": "Invalid file extension format."}), 400
+
     # Create UUID name for local storage masking
     stored_name = f"{uuid.uuid4()}{ext}"
     stored_name = os.path.basename(stored_name)
     file_path = os.path.join(UPLOADS_DIR, stored_name)
+
+    # Path containment check: ensure resolved path stays within UPLOADS_DIR
+    if not os.path.realpath(file_path).startswith(os.path.realpath(UPLOADS_DIR)):
+        return jsonify({"error": "Invalid file path."}), 400
+
     file.save(file_path)
     
     db_execute(
