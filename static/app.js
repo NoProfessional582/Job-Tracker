@@ -2894,8 +2894,16 @@ function setupRichTextPasteInterceptors() {
     const html = e.clipboardData.getData('text/html');
     if (!html) return; // Allow standard plain-text paste if HTML clipboard data is empty
 
+    // Sanitize the HTML string to strip script tags, inline event handlers, and javascript: links to prevent client-side XSS
+    const cleanHtml = html
+      .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+      .replace(/on\w+\s*=\s*"[^"]*"/g, '')
+      .replace(/on\w+\s*=\s*'[^']*'/g, '')
+      .replace(/href\s*=\s*"javascript:[^"]*"/gi, '')
+      .replace(/href\s*=\s*'javascript:[^']*'/gi, '');
+
     const parser = new DOMParser();
-    const doc = parser.parseFromString(html, 'text/html');
+    const doc = parser.parseFromString(cleanHtml, 'text/html');
 
     // If it contains bullet lists or block elements
     const hasStructure = doc.querySelector('li, ul, ol, p, br, div');

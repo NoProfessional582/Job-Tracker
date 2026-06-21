@@ -890,7 +890,8 @@ def add_calendar_event(id):
             start_time = convert_tz_datetime(start_time, event_tz, default_tz)
             end_time = convert_tz_datetime(end_time, event_tz, default_tz)
         except Exception as e:
-            return jsonify({"error": f"Timezone conversion failed: {e}"}), 400
+            app.logger.error(f"Timezone conversion failed: {e}")
+            return jsonify({"error": "Timezone conversion failed due to an invalid format or timezone name."}), 400
             
     event_id = db_execute(
         """INSERT INTO calendar_events (job_id, event_type_id, start_time, end_time, timezone, description, is_tentative)
@@ -916,7 +917,8 @@ def update_calendar_event(event_id):
             start_time = convert_tz_datetime(start_time, event_tz, default_tz)
             end_time = convert_tz_datetime(end_time, event_tz, default_tz)
         except Exception as e:
-            return jsonify({"error": f"Timezone conversion failed: {e}"}), 400
+            app.logger.error(f"Timezone conversion failed: {e}")
+            return jsonify({"error": "Timezone conversion failed due to an invalid format or timezone name."}), 400
             
     db_execute(
         """UPDATE calendar_events 
@@ -946,6 +948,7 @@ def upload_file(id):
         
     # Create UUID name for local storage masking
     stored_name = f"{uuid.uuid4()}{ext}"
+    stored_name = os.path.basename(stored_name)
     file_path = os.path.join(UPLOADS_DIR, stored_name)
     file.save(file_path)
     
@@ -963,6 +966,8 @@ def upload_file(id):
 
 @app.get('/api/files/download/<stored_name>')
 def download_file(stored_name):
+    # Sanitize inputs in path expressions to prevent path traversal
+    stored_name = os.path.basename(stored_name)
     record = db_query("SELECT original_name FROM file_attachments WHERE stored_name = ?", (stored_name,), one=True)
     if not record:
         return jsonify({"error": "Attachment record not found"}), 404
