@@ -512,7 +512,7 @@ window.openNotificationHistoryModal = async () => {
       }).join('');
     }
   } catch (err) {
-    list.innerHTML = `<div style="text-align: center; padding: 24px; color: #f43f5e;">Error: ${err.message}</div>`;
+    list.innerHTML = `<div style="text-align: center; padding: 24px; color: #f43f5e;">Error: ${escapeHTML(err.message)}</div>`;
   }
 };
 
@@ -706,7 +706,7 @@ function renderJobCardHTML(job) {
             <span>Req ID: ${(!job.requisition_id || job.requisition_id.trim() === '' || job.requisition_id === 'None') ? 'None' : escapeHTML(job.requisition_id)}</span>
           </div>
           ${job.target_url ? `
-            <a href="${job.target_url}" target="_blank" rel="noopener noreferrer" class="job-card-link" onclick="event.stopPropagation();" style="font-size: 12px; color: var(--theme-primary); text-decoration: underline; display: flex; align-items: center; gap: 4px;">
+            <a href="${sanitizeUrl(job.target_url)}" target="_blank" rel="noopener noreferrer" class="job-card-link" onclick="event.stopPropagation();" style="font-size: 12px; color: var(--theme-primary); text-decoration: underline; display: flex; align-items: center; gap: 4px;">
               <span>Job Posting</span>
             </a>
           ` : ''}
@@ -853,7 +853,7 @@ function renderKanbanBoard() {
         <div class="column-header">
           <div class="column-title">
             <span class="column-dot" style="background-color: ${status.color}"></span>
-            <span>${status.label}</span>
+            <span>${escapeHTML(status.label)}</span>
           </div>
           <span class="column-count">${colJobs.length}</span>
         </div>
@@ -1413,7 +1413,7 @@ function renderSettings() {
       ${!isEditing ? `
         <strong style="flex-grow: 1; font-size: 14px;">${escapeHTML(st.label)}</strong>
         <span style="font-size: 11px; color: var(--theme-text-muted); margin-right: 12px;">Order: ${st.sort_order}</span>
-        <button class="btn btn-secondary btn-sm" onclick="triggerStatusEdit(${st.id}, '${escapeHTML(st.label)}', '${st.color}')">Edit</button>
+        <button class="btn btn-secondary btn-sm" onclick="triggerStatusEdit(${st.id}, '${escapeHTML(st.label)}', '${escapeHTML(st.color)}')">Edit</button>
       ` : `
         <input type="text" id="status-edit-label-${st.id}" value="${escapeHTML(editingStatus.label)}" style="flex-grow: 1; padding: 4px 8px; font-size: 13px;">
         <input type="color" id="status-edit-color-${st.id}" value="${editingStatus.color}" style="width: 40px; padding: 0; height: 28px; cursor: pointer;">
@@ -1445,7 +1445,7 @@ function renderSettings() {
         ${!isEditing ? `
           <strong style="flex-grow: 1; font-size: 14px;">${escapeHTML(et.label)}</strong>
           <span style="font-size: 11px; color: var(--theme-text-muted); margin-right: 12px;">Order: ${et.sort_order}</span>
-          <button class="btn btn-secondary btn-sm" onclick="triggerEventTypeEdit(${et.id}, '${escapeHTML(et.label)}', '${et.color}')">Edit</button>
+          <button class="btn btn-secondary btn-sm" onclick="triggerEventTypeEdit(${et.id}, '${escapeHTML(et.label)}', '${escapeHTML(et.color)}')">Edit</button>
         ` : `
           <input type="text" id="event-type-edit-label-${et.id}" value="${escapeHTML(editingEventType.label)}" style="flex-grow: 1; padding: 4px 8px; font-size: 13px;">
           <input type="color" id="event-type-edit-color-${et.id}" value="${editingEventType.color}" style="width: 40px; padding: 0; height: 28px; cursor: pointer;">
@@ -1922,7 +1922,7 @@ async function renderDetailModalContent() {
                   <span style="background: rgba(251, 191, 36, 0.15); color: #fbbf24; border: 1px solid rgba(251, 191, 36, 0.3); padding: 1px 6px; border-radius: 4px; font-size: 11px; font-weight: 600; margin-left: 8px;">Req ID: ${escapeHTML(job.requisition_id)}</span>
                 ` : ''}
                 ${job.target_url ? `
-                  <a href="${job.target_url}" target="_blank" rel="noopener noreferrer" style="font-size: 14px; color: var(--theme-primary); text-decoration: underline; margin-left: 8px;">
+                  <a href="${sanitizeUrl(job.target_url)}" target="_blank" rel="noopener noreferrer" style="font-size: 14px; color: var(--theme-primary); text-decoration: underline; margin-left: 8px;">
                     View Job Post
                   </a>
                 ` : ''}
@@ -2878,6 +2878,16 @@ function escapeHTML(str) {
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
 }
+
+function sanitizeUrl(url) {
+  if (!url) return '#';
+  const u = url.trim().toLowerCase();
+  if (u.startsWith('http://') || u.startsWith('https://')) {
+    return escapeHTML(url.trim());
+  }
+  return '#';
+}
+
 
 // Intercept rich text pastes on specific fields and convert them to formatted plain text list items (bullets)
 function setupRichTextPasteInterceptors() {

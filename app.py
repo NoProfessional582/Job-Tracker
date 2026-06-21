@@ -4,9 +4,25 @@ import uuid
 import sqlite3
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from flask import Flask, request, jsonify, send_from_directory, g
+from flask import Flask, request, jsonify, send_from_directory, g, abort
 
 app = Flask(__name__, static_folder='static', static_url_path='')
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16 MB limit
+
+def get_json_data():
+    data = request.json
+    if not data:
+        abort(400, description="Request body must be JSON")
+    return data
+
+@app.errorhandler(400)
+def handle_400_error(e):
+    return jsonify(error=str(e.description)), 400
+
+@app.errorhandler(413)
+def handle_413_error(e):
+    return jsonify(error="Payload Too Large. Maximum allowed size is 16MB."), 413
+
 
 DATABASE_DIR = os.path.join(os.path.dirname(__file__), 'db')
 DATABASE_PATH = os.path.join(DATABASE_DIR, 'database.sqlite')
@@ -422,7 +438,7 @@ def get_settings():
 
 @app.put('/api/settings')
 def update_settings():
-    data = request.json
+    data = get_json_data()
     old_tz = get_setting_val('default_timezone', 'America/Los_Angeles')
     new_tz = data.get('default_timezone')
     
@@ -480,7 +496,7 @@ def get_themes():
 
 @app.post('/api/themes')
 def create_theme():
-    data = request.json
+    data = get_json_data()
     last_id = db_execute(
         """INSERT INTO themes (name, is_dark, primary_color, secondary_color, background_color, card_background_color, text_color, border_color, is_custom)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)""",
@@ -496,7 +512,7 @@ def update_theme(id):
     if not theme['is_custom']:
         return jsonify({"error": "Cannot modify built-in themes"}), 403
         
-    data = request.json
+    data = get_json_data()
     db_execute(
         """UPDATE themes 
            SET name = ?, is_dark = ?, primary_color = ?, secondary_color = ?, background_color = ?, card_background_color = ?, text_color = ?, border_color = ?
@@ -527,7 +543,7 @@ def get_statuses():
 
 @app.post('/api/statuses')
 def create_status():
-    data = request.json
+    data = get_json_data()
     last_id = db_execute(
         "INSERT INTO statuses (label, color, sort_order) VALUES (?, ?, ?)",
         (data['label'], data['color'], data['sort_order'])
@@ -536,7 +552,7 @@ def create_status():
 
 @app.put('/api/statuses/<int:id>')
 def update_status(id):
-    data = request.json
+    data = get_json_data()
     db_execute(
         "UPDATE statuses SET label = ?, color = ?, sort_order = ? WHERE id = ?",
         (data['label'], data['color'], data['sort_order'], id)
@@ -555,7 +571,8 @@ def delete_status(id):
 
 @app.put('/api/statuses/reorder')
 def reorder_statuses():
-    orders = request.json.get('orders', [])
+    data = get_json_data()
+    orders = data.get('orders', [])
     for item in orders:
         db_execute("UPDATE statuses SET sort_order = ? WHERE id = ?", (item['sort_order'], item['id']))
     return jsonify({"message": "Statuses reordered"})
@@ -567,7 +584,7 @@ def get_event_types():
 
 @app.post('/api/event_types')
 def create_event_type():
-    data = request.json
+    data = get_json_data()
     last_id = db_execute(
         "INSERT INTO event_types (label, color, sort_order) VALUES (?, ?, ?)",
         (data['label'], data['color'], data['sort_order'])
@@ -576,7 +593,7 @@ def create_event_type():
 
 @app.put('/api/event_types/<int:id>')
 def update_event_type(id):
-    data = request.json
+    data = get_json_data()
     db_execute(
         "UPDATE event_types SET label = ?, color = ?, sort_order = ? WHERE id = ?",
         (data['label'], data['color'], data['sort_order'], id)
@@ -598,7 +615,8 @@ def delete_event_type(id):
 
 @app.put('/api/event_types/reorder')
 def reorder_event_types():
-    orders = request.json.get('orders', [])
+    data = get_json_data()
+    orders = data.get('orders', [])
     for item in orders:
         db_execute("UPDATE event_types SET sort_order = ? WHERE id = ?", (item['sort_order'], item['id']))
     return jsonify({"message": "Event types reordered"})
@@ -674,7 +692,7 @@ def get_job_detail(id):
 
 @app.post('/api/jobs')
 def create_job():
-    data = request.json
+    data = get_json_data()
     
     posted_date = data.get('posted_date')
     end_date = data.get('end_date')
@@ -728,7 +746,7 @@ def create_job():
 
 @app.put('/api/jobs/<int:id>')
 def update_job(id):
-    data = request.json
+    data = get_json_data()
     org_input = data.get('organization')
     
     org_id = None
@@ -824,7 +842,7 @@ def snooze_job(id):
 # 6. Contacts Endpoints
 @app.post('/api/jobs/<int:id>/contacts')
 def add_contact(id):
-    data = request.json
+    data = get_json_data()
     contact_id = db_execute(
         "INSERT INTO contacts (job_id, name, email, phone) VALUES (?, ?, ?, ?)",
         (id, data['name'], data.get('email'), data.get('phone'))
@@ -839,7 +857,7 @@ def add_contact(id):
 # 7. Notes Endpoints
 @app.post('/api/jobs/<int:id>/notes')
 def add_note(id):
-    data = request.json
+    data = get_json_data()
     note_id = db_execute(
         "INSERT INTO notes (job_id, contact_id, originator_type, content) VALUES (?, ?, ?, ?)",
         (id, data.get('contact_id'), data.get('originator_type', 'none'), data['content'])
@@ -850,7 +868,7 @@ def add_note(id):
 
 @app.put('/api/notes/<int:note_id>')
 def update_note(note_id):
-    data = request.json
+    data = get_json_data()
     db_execute(
         "UPDATE notes SET content = ?, originator_type = ?, contact_id = ? WHERE id = ?",
         (data['content'], data.get('originator_type', 'none'), data.get('contact_id'), note_id)
@@ -880,7 +898,7 @@ def get_calendar():
 
 @app.post('/api/jobs/<int:id>/calendar')
 def add_calendar_event(id):
-    data = request.json
+    data = get_json_data()
     default_tz = get_setting_val('default_timezone', 'America/Los_Angeles')
     event_tz = data.get('timezone', default_tz)
     
@@ -907,7 +925,7 @@ def add_calendar_event(id):
 
 @app.put('/api/calendar/<int:event_id>')
 def update_calendar_event(event_id):
-    data = request.json
+    data = get_json_data()
     default_tz = get_setting_val('default_timezone', 'America/Los_Angeles')
     event_tz = data.get('timezone', default_tz)
     
@@ -1001,7 +1019,7 @@ def get_alerts():
 
 @app.post('/api/alerts/acknowledge')
 def acknowledge_alert():
-    data = request.json
+    data = get_json_data()
     job_id = data['job_id']
     last_activity = data['last_activity']
     
@@ -1013,7 +1031,7 @@ def acknowledge_alert():
 
 @app.post('/api/alerts/acknowledge_all')
 def acknowledge_all_alerts():
-    data = request.json
+    data = get_json_data()
     alerts = data.get('alerts', [])
     for alert in alerts:
         db_execute(
@@ -1041,4 +1059,4 @@ def get_alerts_history():
 
 if __name__ == '__main__':
     # Running locally
-    app.run(host='127.0.0.1', port=5000, debug=False)
+    app.run(host='127.0.0.1', port=5000, debug=True)
