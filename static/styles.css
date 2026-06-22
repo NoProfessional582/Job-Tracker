@@ -693,6 +693,7 @@ body {
   text-overflow: ellipsis;
   font-weight: 500;
   transition: transform var(--transition-fast);
+  flex-shrink: 0;
 }
 
 .event-pill:hover {
@@ -707,9 +708,18 @@ body {
 .day-overflow-arrow {
   text-align: center;
   font-size: 10px;
-  color: var(--theme-text-muted);
+  color: var(--theme-text);
   cursor: pointer;
   font-weight: bold;
+  position: absolute;
+  bottom: 4px;
+  right: 4px;
+  background: var(--theme-card-bg);
+  border: 1px solid var(--theme-border);
+  padding: 2px 6px;
+  border-radius: 4px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+  z-index: 10;
 }
 
 #calendar-grid-root {
@@ -999,6 +1009,14 @@ input, textarea, select {
   font-size: 14px;
   width: 100%;
   transition: all var(--transition-fast);
+}
+
+input[type="checkbox"] {
+  width: auto;
+  padding: 0;
+  margin: 0;
+  transition: none; /* Prevent sizing animation quirks */
+  cursor: pointer;
 }
 
 select {
@@ -1556,3 +1574,30 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   box-shadow: 0 0 0 2px var(--theme-background);
 }
 
+/* Custom Themed Tooltip */
+.custom-tooltip {
+  position: fixed;
+  background: var(--theme-card-bg);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: var(--theme-text);
+  border: 1px solid var(--theme-border);
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  box-shadow: 0 4px 12px var(--theme-shadow);
+  font-size: 12px;
+  font-family: var(--font-body);
+  z-index: 99999;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  max-width: 280px;
+  word-wrap: break-word;
+  white-space: pre-line;
+  text-align: left;
+}
+
+/* Settings Color Palette Swatch */
+.color-swatch:hover {
+  transform: scale(1.15);
+}

@@ -847,12 +847,34 @@ def add_contact(id):
         "INSERT INTO contacts (job_id, name, email, phone) VALUES (?, ?, ?, ?)",
         (id, data['name'], data.get('email'), data.get('phone'))
     )
-    # Add a system note
-    db_execute(
-        "INSERT INTO notes (job_id, originator_type, content) VALUES (?, 'none', ?)",
-        (id, f"Added contact: {data['name']} ({data.get('email') or 'No email'}, {data.get('phone') or 'No phone'})")
-    )
     return jsonify({"id": contact_id}), 201
+
+@app.get('/api/contacts/<int:contact_id>')
+def get_contact(contact_id):
+    contact = db_query("SELECT * FROM contacts WHERE id = ?", (contact_id,), one=True)
+    if not contact:
+        return jsonify({"error": "Contact not found"}), 404
+    return jsonify(row_to_dict(contact))
+
+@app.put('/api/contacts/<int:contact_id>')
+def update_contact(contact_id):
+    data = get_json_data()
+    db_execute(
+        "UPDATE contacts SET name = ?, email = ?, phone = ? WHERE id = ?",
+        (data['name'], data.get('email'), data.get('phone'), contact_id)
+    )
+    contact = db_query("SELECT job_id FROM contacts WHERE id = ?", (contact_id,), one=True)
+    if contact:
+        db_execute("UPDATE jobs SET updated_at = datetime('now') WHERE id = ?", (contact['job_id'],))
+    return jsonify({"message": "Contact updated"})
+
+@app.delete('/api/contacts/<int:contact_id>')
+def delete_contact(contact_id):
+    contact = db_query("SELECT job_id FROM contacts WHERE id = ?", (contact_id,), one=True)
+    if contact:
+        db_execute("UPDATE jobs SET updated_at = datetime('now') WHERE id = ?", (contact['job_id'],))
+    db_execute("DELETE FROM contacts WHERE id = ?", (contact_id,))
+    return jsonify({"message": "Contact deleted"})
 
 # 7. Notes Endpoints
 @app.post('/api/jobs/<int:id>/notes')
@@ -877,6 +899,14 @@ def update_note(note_id):
     if note:
         db_execute("UPDATE jobs SET updated_at = datetime('now') WHERE id = ?", (note['job_id'],))
     return jsonify({"message": "Note updated"})
+
+@app.delete('/api/notes/<int:note_id>')
+def delete_note(note_id):
+    note = db_query("SELECT job_id FROM notes WHERE id = ?", (note_id,), one=True)
+    if note:
+        db_execute("UPDATE jobs SET updated_at = datetime('now') WHERE id = ?", (note['job_id'],))
+    db_execute("DELETE FROM notes WHERE id = ?", (note_id,))
+    return jsonify({"message": "Note deleted"})
 
 # 8. Calendar Endpoints
 @app.get('/api/calendar')
@@ -985,11 +1015,6 @@ def upload_file(id):
         (id, file.filename, stored_name)
     )
     
-    db_execute(
-        "INSERT INTO notes (job_id, originator_type, content) VALUES (?, 'none', ?)",
-        (id, f"Attached file: {file.filename}")
-    )
-    
     return jsonify({"message": "File uploaded", "original_name": file.filename}), 201
 
 @app.get('/api/files/download/<stored_name>')
@@ -1011,6 +1036,24 @@ def download_file(stored_name):
         as_attachment=True, 
         download_name=record['original_name']
     )
+
+@app.delete('/api/files/<int:file_id>')
+def delete_file(file_id):
+    file_record = db_query("SELECT job_id, stored_name FROM file_attachments WHERE id = ?", (file_id,), one=True)
+    if not file_record:
+        return jsonify({"error": "File attachment not found"}), 404
+        
+    # Remove physical file
+    file_path = os.path.join(UPLOADS_DIR, file_record['stored_name'])
+    if os.path.exists(file_path):
+        try:
+            os.remove(file_path)
+        except Exception as e:
+            app.logger.error(f"Failed to delete physical file: {e}")
+            
+    db_execute("DELETE FROM file_attachments WHERE id = ?", (file_id,))
+    db_execute("UPDATE jobs SET updated_at = datetime('now') WHERE id = ?", (file_record['job_id'],))
+    return jsonify({"message": "File attachment deleted"})
 
 # 10. Alerts Endpoint
 @app.get('/api/alerts')

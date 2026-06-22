@@ -30,6 +30,38 @@ let isEditMode = false;
 let expandedDayStr = null; // Calendar month overflow day date string
 let jobIdToDelete = null;
 
+// --- Custom Color Palette Helpers ---
+window.selectColorSwatch = function(swatchEl, inputId, color) {
+  const input = document.getElementById(inputId);
+  if (input) input.value = color;
+  const parent = swatchEl.parentElement;
+  if (parent) {
+    parent.querySelectorAll('.color-swatch').forEach(el => {
+      el.style.borderColor = 'transparent';
+    });
+  }
+  swatchEl.style.borderColor = 'var(--theme-text)';
+};
+
+window.renderColorPalette = function(inputId, selectedColor) {
+  const colors = ['#6366f1', '#a855f7', '#ec4899', '#ef4444', '#f97316', '#eab308', '#22c55e', '#10b981', '#14b8a6', '#3b82f6'];
+  const safeColor = selectedColor ? selectedColor.toLowerCase() : colors[0];
+  
+  return `
+    <div class="color-palette-container" style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
+      <input type="hidden" id="${inputId}" value="${safeColor}">
+      ${colors.map(c => `
+        <div 
+          class="color-swatch" 
+          style="width: 20px; height: 20px; border-radius: 50%; background-color: ${c}; cursor: pointer; border: 2px solid ${c === safeColor ? 'var(--theme-text)' : 'transparent'}; transition: transform 0.15s, border-color 0.15s; box-shadow: 0 2px 4px rgba(0,0,0,0.2);"
+          onclick="selectColorSwatch(this, '${inputId}', '${c}')"
+          data-tooltip="Select color ${c}"
+        ></div>
+      `).join('')}
+    </div>
+  `;
+};
+
 function parseAndFormatSalary(val) {
   if (!val) return '';
   const trimmed = val.trim();
@@ -78,6 +110,19 @@ function parseAndFormatSalary(val) {
   }
 
   // Fallback to original input text if it's non-numeric (e.g. "Competitive", "DOE")
+  return trimmed;
+}
+
+function parseAndFormatPhone(val) {
+  if (!val) return '';
+  const trimmed = val.trim();
+  if (!trimmed) return '';
+  const digits = trimmed.replace(/\D/g, ''); // strip non-digits
+  if (digits.length === 10) {
+    return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`;
+  } else if (digits.length === 11 && digits.startsWith('1')) {
+    return `${digits.slice(1, 4)}-${digits.slice(4, 7)}-${digits.slice(7)}`;
+  }
   return trimmed;
 }
 
@@ -683,7 +728,7 @@ function renderJobCardHTML(job) {
 
         ${(job.remote || (job.location && job.location.trim() !== '' && job.location !== 'None')) ? `
           <div class="job-card-org" style="color: var(--theme-text-muted); display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
-            ${job.remote ? `<span style="background: rgba(99, 102, 241, 0.2); color: #818cf8; border: 1px solid rgba(99, 102, 241, 0.4); padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 600;">☁️ Remote</span>` : ''}
+            ${job.remote ? `<span style="background: rgba(99, 102, 241, 0.2); color: #818cf8; border: 1px solid rgba(99, 102, 241, 0.4); padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 600;">Remote</span>` : ''}
             ${(job.location && job.location.trim() !== '' && job.location !== 'None') ? `<span>${escapeHTML(job.location)}</span>` : ''}
           </div>
         ` : ''}
@@ -1017,12 +1062,12 @@ async function renderMonthGrid() {
     const isToday = cellDateStr === todayStr;
     const dayEvents = calEvents.filter(e => parseTzNaive(e.start_time).toDateString() === cellDateStr);
 
-    const maxVisible = 3;
+    const maxVisible = 2;
     const visibleEvents = dayEvents.slice(0, maxVisible);
     const overflowCount = dayEvents.length - maxVisible;
 
     html += `
-      <div class="day-box ${!cell.isCurrentMonth ? 'outside' : ''} ${isToday ? 'today' : ''}" style="position: relative;">
+      <div class="day-box ${!cell.isCurrentMonth ? 'outside' : ''} ${isToday ? 'today' : ''}" style="position: relative; cursor: pointer;" onclick="switchToWeekView('${cellDateStr}')">
         <div class="day-number">${cell.num}</div>
         <div style="display: flex; flex-direction: column; gap: 2px; margin-top: 4px; overflow: hidden;">
           ${visibleEvents.map(evt => {
@@ -1033,8 +1078,8 @@ async function renderMonthGrid() {
               <div 
                 class="event-pill ${evt.is_tentative ? 'tentative' : ''}"
                 style="background-color: ${color}"
-                onclick="openJobDetailModal(${evt.job_id})"
-                title="${escapeHTML(tooltip)}"
+                onclick="event.stopPropagation(); openJobDetailModal(${evt.job_id})"
+                data-tooltip="${escapeHTML(tooltip)}"
               >
                 ${time} ${escapeHTML(evt.organization_name)} - ${escapeHTML(evt.event_type_label || 'Event')}
               </div>
@@ -1042,36 +1087,11 @@ async function renderMonthGrid() {
           }).join('')}
 
           ${overflowCount > 0 ? `
-            <div class="day-overflow-arrow" onclick="toggleCalendarPopover(event, '${cellDateStr}')">
-              + ${overflowCount} more events
+            <div class="day-overflow-arrow" data-tooltip="${overflowCount} more events">
+              +${overflowCount}
             </div>
           ` : ''}
         </div>
-
-        <!-- Expanded Popover list -->
-        ${expandedDayStr === cellDateStr ? `
-          <div style="position: absolute; top: 100%; left: 50%; transform: translateX(-50%); z-index: 50; width: 200px; background: var(--theme-card-bg); border: 1px solid var(--theme-border); border-radius: var(--radius-md); padding: 8px; box-shadow: 0 8px 30px rgba(0,0,0,0.5); backdrop-filter: blur(20px);">
-            <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--theme-border); padding-bottom: 4px; margin-bottom: 6px; font-size: 11px; font-weight: bold;">
-              <span>All Events</span>
-              <span style="cursor: pointer;" onclick="toggleCalendarPopover(event, null)">×</span>
-            </div>
-            <div style="display: flex; flex-direction: column; gap: 4px;">
-              ${dayEvents.map(evt => {
-                const time = parseTzNaive(evt.start_time).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-                const color = evt.event_type_color || 'var(--theme-primary)';
-                return `
-                  <div 
-                    class="event-pill ${evt.is_tentative ? 'tentative' : ''}"
-                    style="background-color: ${color}; white-space: normal;"
-                    onclick="openJobDetailModal(${evt.job_id})"
-                  >
-                    <strong>${time}</strong> - ${escapeHTML(evt.organization_name)}: ${escapeHTML(evt.event_type_label || 'Event')}
-                  </div>
-                `;
-              }).join('')}
-            </div>
-          </div>
-        ` : ''}
       </div>
     `;
   });
@@ -1083,11 +1103,12 @@ async function renderMonthGrid() {
   root.innerHTML = html;
 }
 
-// Toggle overflow popover list
-window.toggleCalendarPopover = (e, dateStr) => {
-  e.stopPropagation();
-  expandedDayStr = dateStr;
-  renderMonthGrid();
+window.switchToWeekView = (dateStr) => {
+  currentCalendarDate = new Date(dateStr);
+  calendarViewMode = 'week';
+  document.getElementById('btn-cal-month').classList.remove('active');
+  document.getElementById('btn-cal-week').classList.add('active');
+  renderCalendar();
 };
 
 // Render Week Grid
@@ -1261,7 +1282,7 @@ async function renderWeekGrid() {
                         class="week-event-card ${evt.is_tentative ? 'tentative' : ''}"
                         style="top: ${topPos}px; height: ${heightVal}px; background-color: ${color}; display: flex; flex-direction: column; justify-content: center; ${layoutStyle}"
                         onclick="openJobDetailModal(${evt.job_id})"
-                        title="${escapeHTML(tooltipText)}"
+                        data-tooltip="${escapeHTML(tooltipText)}"
                       >
                         <div style="font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; text-align: center; padding: 0 4px;">
                           ${escapeHTML(displayLabelShort)}
@@ -1416,12 +1437,12 @@ function renderSettings() {
         <button class="btn btn-secondary btn-sm" onclick="triggerStatusEdit(${st.id}, '${escapeHTML(st.label)}', '${escapeHTML(st.color)}')">Edit</button>
       ` : `
         <input type="text" id="status-edit-label-${st.id}" value="${escapeHTML(editingStatus.label)}" style="flex-grow: 1; padding: 4px 8px; font-size: 13px;">
-        <input type="color" id="status-edit-color-${st.id}" value="${editingStatus.color}" style="width: 40px; padding: 0; height: 28px; cursor: pointer;">
+        ${renderColorPalette('status-edit-color-' + st.id, editingStatus.color)}
         <button class="btn btn-primary btn-sm" onclick="saveStatusEdit(${st.id})">Save</button>
         <button class="btn btn-secondary btn-sm" onclick="triggerStatusEdit(null)">Cancel</button>
       `}
 
-      <button class="btn btn-danger btn-sm" onclick="deleteStatusColumn(${st.id})" title="Delete Status" style="padding: 6px;">🗑️</button>
+      <button class="btn btn-danger btn-sm" onclick="deleteStatusColumn(${st.id})" data-tooltip="Delete Status" style="padding: 6px;">🗑️</button>
     `;
     statusContainer.appendChild(row);
   });
@@ -1448,12 +1469,12 @@ function renderSettings() {
           <button class="btn btn-secondary btn-sm" onclick="triggerEventTypeEdit(${et.id}, '${escapeHTML(et.label)}', '${escapeHTML(et.color)}')">Edit</button>
         ` : `
           <input type="text" id="event-type-edit-label-${et.id}" value="${escapeHTML(editingEventType.label)}" style="flex-grow: 1; padding: 4px 8px; font-size: 13px;">
-          <input type="color" id="event-type-edit-color-${et.id}" value="${editingEventType.color}" style="width: 40px; padding: 0; height: 28px; cursor: pointer;">
+          ${renderColorPalette('event-type-edit-color-' + et.id, editingEventType.color)}
           <button class="btn btn-primary btn-sm" onclick="saveEventTypeEdit(${et.id})">Save</button>
           <button class="btn btn-secondary btn-sm" onclick="triggerEventTypeEdit(null)">Cancel</button>
         `}
 
-        <button class="btn btn-danger btn-sm" onclick="deleteEventType(${et.id})" title="Delete Event Type" style="padding: 6px;">🗑️</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteEventType(${et.id})" data-tooltip="Delete Event Type" style="padding: 6px;">🗑️</button>
       `;
       eventTypeContainer.appendChild(row);
     });
@@ -1930,7 +1951,7 @@ async function renderDetailModalContent() {
               <div style="display: flex; gap: 16px; margin-top: 8px; font-size: 13px; color: var(--theme-text-muted); flex-wrap: wrap; align-items: center;">
                 ${job.posted_date ? `<span><strong>Posted:</strong> ${formatLocalDate(job.posted_date)}</span>` : ''}
                 ${job.end_date ? `<span style="color: #fb7185; display: inline-flex; align-items: center; gap: 4px;"><strong>Closes:</strong> ${formatLocalDate(job.end_date)}</span>` : ''}
-                ${job.remote ? `<span style="background: rgba(99, 102, 241, 0.2); color: #818cf8; border: 1px solid rgba(99, 102, 241, 0.4); padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 600;">☁️ Remote</span>` : ''}
+                ${job.remote ? `<span style="background: rgba(99, 102, 241, 0.2); color: #818cf8; border: 1px solid rgba(99, 102, 241, 0.4); padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 600;">Remote</span>` : ''}
                 ${(job.location && job.location.trim() !== '' && job.location !== 'None') ? `<span><strong>Location:</strong> 📍 ${escapeHTML(job.location)}</span>` : ''}
               </div>
             </div>
@@ -2033,9 +2054,12 @@ async function renderDetailModalContent() {
                         <!-- Edit mode -->
                         <div id="note-edit-${item.data.id}" style="display: none; margin-top: 8px;">
                           <textarea id="note-edit-textarea-${item.data.id}" style="width: 100%; min-height: 80px; padding: 8px; margin-bottom: 8px; font-family: var(--font-body); font-size: 13px; background: rgba(0,0,0,0.3); color: var(--theme-text); border: 1px solid var(--theme-border); border-radius: var(--radius-sm); resize: vertical;">${escapeHTML(item.data.content)}</textarea>
-                          <div style="display: flex; gap: 8px; justify-content: flex-end;">
-                            <button class="btn btn-secondary btn-sm" style="padding: 4px 8px; font-size: 11px;" onclick="cancelNoteEditMode(${item.data.id})">Cancel</button>
-                            <button class="btn btn-primary btn-sm" style="padding: 4px 8px; font-size: 11px;" onclick="saveNoteEdit(${item.data.id}, ${job.id})">Save</button>
+                           <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <button class="btn btn-danger btn-sm" style="padding: 4px 8px; font-size: 11px;" onclick="deleteJobNote(${item.data.id}, ${job.id})">Delete Note</button>
+                            <div style="display: flex; gap: 8px;">
+                              <button class="btn btn-secondary btn-sm" style="padding: 4px 8px; font-size: 11px;" onclick="cancelNoteEditMode(${item.data.id})">Cancel</button>
+                              <button class="btn btn-primary btn-sm" style="padding: 4px 8px; font-size: 11px;" onclick="saveNoteEdit(${item.data.id}, ${job.id})">Save</button>
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -2049,7 +2073,7 @@ async function renderDetailModalContent() {
                         </div>
                         <div style="display: flex; align-items: center; gap: 12px;">
                           <span style="font-size: 11px; color: var(--theme-text-muted);">${new Date(item.data.uploaded_at).toLocaleDateString()}</span>
-                          <a href="/api/files/download/${item.data.stored_name}" download class="file-download-icon" title="Download">⬇️</a>
+                          <a href="/api/files/download/${item.data.stored_name}" download class="file-download-icon" data-tooltip="Download">⬇️</a>
                         </div>
                       </div>
                     `;
@@ -2101,14 +2125,17 @@ async function renderDetailModalContent() {
 
               <div class="contacts-list">
                 ${job.contacts.length > 0 ? job.contacts.map(c => `
-                  <div class="contact-item">
-                    <div class="contact-name">${escapeHTML(c.name)}</div>
-                    ${(c.email || c.phone) ? `
-                      <div class="contact-details">
-                        ${c.email ? `<div>${escapeHTML(c.email)}</div>` : ''}
-                        ${c.phone ? `<div>${escapeHTML(c.phone)}</div>` : ''}
-                      </div>
-                    ` : ''}
+                  <div class="contact-item" style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+                    <div style="flex-grow: 1; min-width: 0;">
+                      <div class="contact-name" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHTML(c.name)}</div>
+                      ${(c.email || c.phone) ? `
+                        <div class="contact-details" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                          ${c.email ? `<div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHTML(c.email)}</div>` : ''}
+                          ${c.phone ? `<div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHTML(parseAndFormatPhone(c.phone))}</div>` : ''}
+                        </div>
+                      ` : ''}
+                    </div>
+                    <button class="btn btn-secondary btn-sm" style="padding: 2px 6px; font-size: 10px; flex-shrink: 0;" onclick="openEditContactModal(${c.id}, ${job.id})">✏️</button>
                   </div>
                 `).join('') : '<div style="font-size: 12px; color: var(--theme-text-muted); text-align: center; padding: 12px 0;">No contacts.</div>'}
               </div>
@@ -2126,8 +2153,11 @@ async function renderDetailModalContent() {
               <div class="files-list">
                 ${job.files.length > 0 ? job.files.map(f => `
                   <div class="file-row" style="padding: 6px 10px; font-size: 12px;">
-                    <span class="file-name" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px;" title="${escapeHTML(f.original_name)}">${escapeHTML(f.original_name)}</span>
-                    <a href="/api/files/download/${f.stored_name}" download class="file-download-icon">⬇️</a>
+                    <span class="file-name" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px;" data-tooltip="${escapeHTML(f.original_name)}">${escapeHTML(f.original_name)}</span>
+                    <div style="display: flex; gap: 8px; align-items: center;">
+                      <a href="/api/files/download/${f.stored_name}" download class="file-download-icon" data-tooltip="Download">⬇️</a>
+                      <button class="btn btn-link btn-sm" onclick="deleteJobFile(${f.id}, ${job.id})" data-tooltip="Delete Attachment" style="padding: 0; background: none; border: none; cursor: pointer; font-size: 12px; line-height: 1;">🗑️</button>
+                    </div>
                   </div>
                 `).join('') : '<div style="font-size: 12px; color: var(--theme-text-muted); text-align: center; padding: 12px 0;">No files uploaded.</div>'}
               </div>
@@ -2605,6 +2635,82 @@ window.saveNoteEdit = async (noteId, jobId) => {
   }
 };
 
+window.deleteJobNote = async (noteId, jobId) => {
+  const confirmed = await showConfirmDialog(
+    '🗑️ Delete Note?',
+    'Delete this note permanently? This cannot be undone.',
+    'Delete Note'
+  );
+  if (confirmed) {
+    try {
+      await apiFetch(`/api/notes/${noteId}`, { method: 'DELETE' });
+      if (selectedJobId === jobId) {
+        openJobDetailModal(jobId);
+      }
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  }
+};
+
+window.deleteJobFile = async (fileId, jobId) => {
+  const confirmed = await showConfirmDialog(
+    '🗑️ Delete Attachment?',
+    'Delete this file attachment permanently? This cannot be undone.',
+    'Delete Attachment'
+  );
+  if (confirmed) {
+    try {
+      await apiFetch(`/api/files/${fileId}`, { method: 'DELETE' });
+      if (selectedJobId === jobId) {
+        openJobDetailModal(jobId);
+      }
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  }
+};
+
+window.openEditContactModal = async (contactId, jobId) => {
+  try {
+    const contact = await apiFetch(`/api/contacts/${contactId}`);
+    
+    document.getElementById('edit-contact-id').value = contact.id;
+    document.getElementById('edit-contact-job-id').value = jobId;
+    document.getElementById('edit-contact-name').value = contact.name || '';
+    document.getElementById('edit-contact-email').value = contact.email || '';
+    document.getElementById('edit-contact-phone').value = contact.phone || '';
+    
+    document.getElementById('edit-contact-modal').classList.add('active');
+    
+    // Bind Delete Button
+    document.getElementById('btn-delete-contact').onclick = async () => {
+      const confirmed = await showConfirmDialog(
+        '🗑️ Delete Contact?',
+        'Delete this contact permanently? This cannot be undone.',
+        'Delete Contact'
+      );
+      if (confirmed) {
+        try {
+          await apiFetch(`/api/contacts/${contact.id}`, { method: 'DELETE' });
+          closeEditContactModal();
+          if (selectedJobId === jobId) {
+            openJobDetailModal(jobId);
+          }
+        } catch (err) {
+          showToast(err.message, 'error');
+        }
+      }
+    };
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+};
+
+window.closeEditContactModal = () => {
+  document.getElementById('edit-contact-modal').classList.remove('active');
+};
+
 // --- Calendar Event Editing functions ---
 window.openEditEventModal = (eventId, jobId) => {
   const evt = globalEvents.find(e => e.id === eventId);
@@ -3012,6 +3118,26 @@ function setupRichTextPasteInterceptors() {
 document.addEventListener('DOMContentLoaded', () => {
   setupRichTextPasteInterceptors();
 
+  // Close modals when clicking outside the modal content (on the overlay)
+  document.addEventListener('click', (e) => {
+    if (e.target.classList.contains('modal-overlay')) {
+      const modalId = e.target.id;
+      if (modalId === 'job-detail-modal' && typeof window.closeJobDetailModal === 'function') {
+        window.closeJobDetailModal();
+      } else if (modalId === 'add-job-modal' && typeof window.closeAddJobModal === 'function') {
+        window.closeAddJobModal();
+      } else if (modalId === 'edit-event-modal' && typeof window.closeEditEventModal === 'function') {
+        window.closeEditEventModal();
+      } else if (modalId === 'edit-contact-modal' && typeof window.closeEditContactModal === 'function') {
+        window.closeEditContactModal();
+      } else if (modalId === 'notification-history-modal' && typeof window.closeNotificationHistoryModal === 'function') {
+        window.closeNotificationHistoryModal();
+      } else if (modalId === 'delete-confirm-modal' && typeof window.closeDeleteConfirmModal === 'function') {
+        window.closeDeleteConfirmModal();
+      }
+    }
+  });
+
   // Bind board sorting and filtering listeners
   const boardSortSelect = document.getElementById('board-sort-select');
   if (boardSortSelect) {
@@ -3084,10 +3210,13 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Bind focusout event delegation for salary auto-formatting
+  // Bind focusout event delegation for salary and phone auto-formatting
   document.addEventListener('focusout', (e) => {
     if (e.target && (e.target.id === 'job-salary' || e.target.id === 'edit-salary')) {
       e.target.value = parseAndFormatSalary(e.target.value);
+    }
+    if (e.target && (e.target.id === 'contact-phone-input' || e.target.id === 'edit-contact-phone-input' || e.target.id === 'edit-contact-phone')) {
+      e.target.value = parseAndFormatPhone(e.target.value);
     }
   });
 
@@ -3132,6 +3261,33 @@ document.addEventListener('DOMContentLoaded', () => {
           openJobDetailModal(jobId);
         }
         renderCalendar();
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    });
+  }
+
+  // Bind form submit for edit contact
+  const editContactForm = document.getElementById('edit-contact-form');
+  if (editContactForm) {
+    editContactForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const contactId = document.getElementById('edit-contact-id').value;
+      const jobId = parseInt(document.getElementById('edit-contact-job-id').value, 10);
+      const name = document.getElementById('edit-contact-name').value.trim();
+      const email = document.getElementById('edit-contact-email').value.trim();
+      const phone = document.getElementById('edit-contact-phone').value.trim();
+      
+      try {
+        await apiFetch(`/api/contacts/${contactId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, email, phone })
+        });
+        closeEditContactModal();
+        if (selectedJobId === jobId) {
+          openJobDetailModal(jobId);
+        }
       } catch (err) {
         showToast(err.message, 'error');
       }
@@ -3312,6 +3468,112 @@ document.addEventListener('DOMContentLoaded', () => {
       if (endEl) endEl.value = getNext30MinSlot(e.target.value);
     }
   });
+
+  // --- Global Custom Themed Tooltip Logic ---
+  const customTooltip = document.getElementById('custom-tooltip');
+  if (customTooltip) {
+    let currentTooltipTarget = null;
+
+    document.addEventListener('mouseover', (e) => {
+      const target = e.target.closest('[data-tooltip], [title]');
+      if (!target) return;
+
+      // Convert native title to data-tooltip to suppress browser default behavior
+      if (target.hasAttribute('title')) {
+        const titleText = target.getAttribute('title');
+        if (titleText.trim() !== '') {
+          target.setAttribute('data-tooltip', titleText);
+        }
+        target.removeAttribute('title');
+      }
+
+      const tooltipText = target.getAttribute('data-tooltip');
+      if (!tooltipText) return;
+
+      currentTooltipTarget = target;
+      
+      // HTML escape the text to prevent XSS issues, then bold key headers
+      let safeHtml = escapeHTML(tooltipText);
+      safeHtml = safeHtml.replace(/^(Org|Job|Type|Time|Desc|Note):/gm, '<strong>$1:</strong>');
+
+      customTooltip.innerHTML = safeHtml; 
+      customTooltip.style.opacity = '1';
+    });
+
+    document.addEventListener('mousemove', (e) => {
+      if (!currentTooltipTarget) return;
+      
+      const offset = 12; // Pixel offset from mouse cursor
+      let x = e.clientX + offset;
+      let y = e.clientY + offset;
+
+      // Adjust position if tooltip goes off-screen
+      const tooltipRect = customTooltip.getBoundingClientRect();
+      const viewportWidth = window.innerWidth;
+      const viewportHeight = window.innerHeight;
+
+      if (x + tooltipRect.width > viewportWidth - offset) {
+        x = e.clientX - tooltipRect.width - offset;
+      }
+      if (y + tooltipRect.height > viewportHeight - offset) {
+        y = e.clientY - tooltipRect.height - offset;
+      }
+
+      customTooltip.style.left = `${x}px`;
+      customTooltip.style.top = `${y}px`;
+    });
+
+    document.addEventListener('mouseout', (e) => {
+      if (!currentTooltipTarget) return;
+      // Only hide if we actually move out of the target (not into a child node)
+      if (e.relatedTarget && currentTooltipTarget.contains(e.relatedTarget)) {
+        return;
+      }
+      customTooltip.style.opacity = '0';
+      currentTooltipTarget = null;
+    });
+  }
+
+  // --- Global Modal Scroll Delegation ---
+  // When the user scrolls over the dark .modal-overlay background, pass the scroll
+  // directly to the .modal-content so the modal scrolls naturally.
+  document.addEventListener('wheel', (e) => {
+    if (e.target && e.target.classList && e.target.classList.contains('modal-overlay')) {
+      const modalContent = e.target.querySelector('.modal-content');
+      if (modalContent) {
+        modalContent.scrollTop += e.deltaY;
+      }
+    }
+  }, { passive: true });
+
+  // Proxy touch drag scrolling for mobile devices
+  let modalTouchStartY = 0;
+  document.addEventListener('touchstart', (e) => {
+    if (e.target && e.target.classList && e.target.classList.contains('modal-overlay')) {
+      modalTouchStartY = e.touches[0].clientY;
+    }
+  }, { passive: true });
+
+  document.addEventListener('touchmove', (e) => {
+    if (e.target && e.target.classList && e.target.classList.contains('modal-overlay')) {
+      const modalContent = e.target.querySelector('.modal-content');
+      if (modalContent) {
+        const touchY = e.touches[0].clientY;
+        modalContent.scrollTop += (modalTouchStartY - touchY);
+        modalTouchStartY = touchY;
+      }
+    }
+  }, { passive: true });
+
+  // Initialize static form color palettes
+  const newStatusPalette = document.getElementById('new-status-palette-wrapper');
+  if (newStatusPalette) {
+    newStatusPalette.innerHTML = renderColorPalette('new-status-color', '#6366f1');
+  }
+  const newEventTypePalette = document.getElementById('new-event-type-palette-wrapper');
+  if (newEventTypePalette) {
+    newEventTypePalette.innerHTML = renderColorPalette('new-event-type-color', '#a855f7');
+  }
 
   fetchDashboardData();
 });

@@ -64,7 +64,7 @@
         <div style="display: flex; align-items: center; gap: 12px; position: relative;">
           <!-- Notification Bell Wrapper -->
           <div class="notification-wrapper" style="position: relative;">
-            <button id="btn-notification-trigger" class="btn btn-secondary" style="position: relative; padding: 8px 12px; font-size: 18px; border-radius: 50%; width: 42px; height: 42px; display: flex; align-items: center; justify-content: center;" title="Notifications">
+            <button id="btn-notification-trigger" class="btn btn-secondary" style="position: relative; padding: 8px 12px; font-size: 18px; border-radius: 50%; width: 42px; height: 42px; display: flex; align-items: center; justify-content: center;" data-tooltip="Notifications">
               🔔
               <span id="notification-badge" class="notification-badge" style="display: none;">0</span>
             </button>
@@ -115,7 +115,7 @@
               <!-- Sorting & Visual Board Controls -->
               <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
                 <div style="display: flex; align-items: center; gap: 8px;">
-                  <span id="btn-sort-dir-toggle" style="cursor: pointer; user-select: none; font-size: 14px; color: var(--theme-primary); display: inline-flex; align-items: center; padding: 2px 4px; background: rgba(255, 255, 255, 0.05); border: 1px solid var(--theme-border); border-radius: var(--radius-sm);" title="Toggle Sort Direction">
+                  <span id="btn-sort-dir-toggle" style="cursor: pointer; user-select: none; font-size: 14px; color: var(--theme-primary); display: inline-flex; align-items: center; padding: 2px 4px; background: rgba(255, 255, 255, 0.05); border: 1px solid var(--theme-border); border-radius: var(--radius-sm);" data-tooltip="Toggle Sort Direction">
                     <span id="sort-dir-arrow">↓</span>
                   </span>
                   <label for="board-sort-select" style="font-size: 13px; font-weight: 600; color: var(--theme-text-muted); cursor: pointer;">Sort:</label>
@@ -307,8 +307,8 @@
                 <strong style="font-size: 13px;">Add Column:</strong>
                 <input type="text" id="new-status-label" placeholder="e.g. Code Review" required style="flex-grow: 1; min-width: 150px; padding: 8px 12px;">
                 <div style="display: flex; align-items: center; gap: 8px;">
-                  <label for="new-status-color">Color</label>
-                  <input type="color" id="new-status-color" value="#6366f1" style="width: 40px; padding: 0; height: 32px; cursor: pointer;">
+                  <label>Color</label>
+                  <div id="new-status-palette-wrapper"></div>
                 </div>
                 <button type="submit" class="btn btn-primary btn-sm">Create Column</button>
               </form>
@@ -327,8 +327,8 @@
                 <strong style="font-size: 13px;">Add Event Type:</strong>
                 <input type="text" id="new-event-type-label" placeholder="e.g. Coding Session" required style="flex-grow: 1; min-width: 150px; padding: 8px 12px;">
                 <div style="display: flex; align-items: center; gap: 8px;">
-                  <label for="new-event-type-color">Color</label>
-                  <input type="color" id="new-event-type-color" value="#a855f7" style="width: 40px; padding: 0; height: 32px; cursor: pointer;">
+                  <label>Color</label>
+                  <div id="new-event-type-palette-wrapper"></div>
                 </div>
                 <button type="submit" class="btn btn-primary btn-sm">Create Event Type</button>
               </form>
@@ -522,7 +522,7 @@
         <button class="modal-close-btn" onclick="closeJobDetailModal()">×</button>
         
         <!-- Toggle View/Edit Mode Button -->
-        <button id="btn-toggle-edit-mode" class="btn btn-secondary btn-sm" style="position: absolute; top: 24px; right: 72px; width: 36px; height: 36px; padding: 0; display: flex; align-items: center; justify-content: center; border-radius: 50%;" title="Edit Job">
+        <button id="btn-toggle-edit-mode" class="btn btn-secondary btn-sm" style="position: absolute; top: 24px; right: 72px; width: 36px; height: 36px; padding: 0; display: flex; align-items: center; justify-content: center; border-radius: 50%;" data-tooltip="Edit Job">
           <span>📝</span>
           <span id="edit-btn-text" style="display: none;">Edit Job</span>
         </button>
@@ -611,6 +611,42 @@
       </div>
     </div>
 
+    <!-- Modal 3b: Edit Contact -->
+    <div id="edit-contact-modal" class="modal-overlay">
+      <div class="modal-content" style="max-width: 500px;">
+        <button class="modal-close-btn" onclick="closeEditContactModal()">×</button>
+        <h2 style="font-family: var(--font-heading); margin-bottom: 24px; font-size: 20px;">Edit Contact</h2>
+        
+        <form id="edit-contact-form">
+          <input type="hidden" id="edit-contact-id">
+          <input type="hidden" id="edit-contact-job-id">
+          
+          <div class="form-group">
+            <label for="edit-contact-name">Name *</label>
+            <input type="text" id="edit-contact-name" required placeholder="Name">
+          </div>
+          
+          <div class="form-group">
+            <label for="edit-contact-email">Email</label>
+            <input type="email" id="edit-contact-email" placeholder="Email">
+          </div>
+
+          <div class="form-group">
+            <label for="edit-contact-phone">Phone</label>
+            <input type="text" id="edit-contact-phone" placeholder="Phone">
+          </div>
+          
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 24px; gap: 12px; flex-wrap: wrap;">
+            <button type="button" id="btn-delete-contact" class="btn btn-danger btn-sm">Delete Contact</button>
+            <div style="display: flex; gap: 12px;">
+              <button type="button" class="btn btn-secondary btn-sm" onclick="closeEditContactModal()">Cancel</button>
+              <button type="submit" class="btn btn-primary btn-sm">Save</button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+
     <!-- Modal 4: Acknowledged Notifications History -->
     <div id="notification-history-modal" class="modal-overlay">
       <div class="modal-content" style="max-width: 600px;">
@@ -655,6 +691,9 @@
 
     <!-- Toast Notification Container -->
     <div id="toast-container" style="position: fixed; bottom: 24px; right: 24px; z-index: 9999; display: flex; flex-direction: column; gap: 10px; pointer-events: none;"></div>
+
+    <!-- Custom Tooltip Container -->
+    <div id="custom-tooltip" class="custom-tooltip" style="opacity: 0; pointer-events: none;"></div>
 
   </div>
 
