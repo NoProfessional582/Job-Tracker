@@ -2999,7 +2999,8 @@ function sanitizeUrl(url) {
 function setupRichTextPasteInterceptors() {
   const selectors = [
     '#job-comp', '#job-desc', '#job-req', '#job-pref',
-    '#edit-comp', '#edit-desc', '#edit-req', '#edit-pref'
+    '#edit-comp', '#edit-desc', '#edit-req', '#edit-pref',
+    '#note-content-input', 'textarea[id^="note-edit-textarea-"]'
   ];
 
   document.addEventListener('paste', function(e) {
