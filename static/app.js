@@ -23,9 +23,11 @@ let staleJobs = [];
 let systemNotifications = []; // App-level tip/warning notices shown in the notification dropdown
 let globalEvents = [];
 let eventTypes = [];
+let globalTasks = [];
 let editingEventTypeId = null;
 let editingEventType = { label: '', color: '' };
 
+let activeDetailTab = 'tab-overview';
 let selectedJobId = null;
 let isEditMode = false;
 let expandedDayStr = null; // Calendar month overflow day date string
@@ -299,7 +301,7 @@ async function apiFetch(url, options = {}) {
 // Fetch all dashboard data concurrently
 async function fetchDashboardData() {
   try {
-    const [statusesData, orgsData, jobsData, themesData, settingsData, alertsData, eventTypesData, timezonesData] = await Promise.all([
+    const [statusesData, orgsData, jobsData, themesData, settingsData, alertsData, eventTypesData, timezonesData, globalTasksData] = await Promise.all([
       apiFetch('/api/statuses'),
       apiFetch('/api/organizations'),
       apiFetch('/api/jobs'),
@@ -307,7 +309,8 @@ async function fetchDashboardData() {
       apiFetch('/api/settings'),
       apiFetch('/api/alerts'),
       apiFetch('/api/event_types'),
-      apiFetch('/api/timezones')
+      apiFetch('/api/timezones'),
+      apiFetch('/api/global_tasks')
     ]);
 
     statuses = statusesData;
@@ -318,6 +321,7 @@ async function fetchDashboardData() {
     staleJobs = alertsData;
     eventTypes = eventTypesData;
     timezones = timezonesData;
+    globalTasks = globalTasksData;
 
     // Apply loaded view preferences from settings database
     if (settings.pref_kanban_view_mode) {
@@ -634,6 +638,7 @@ window.closeNotificationHistoryModal = () => {
 // --- App Shell Tab Swapping ---
 const tabs = [
   { id: 'kanban', navId: 'nav-kanban', panelId: 'panel-kanban' },
+  { id: 'metrics', navId: 'nav-metrics', panelId: 'panel-metrics' },
   { id: 'calendar', navId: 'nav-calendar', panelId: 'panel-calendar' },
   { id: 'settings', navId: 'nav-settings', panelId: 'panel-settings' }
 ];
@@ -674,6 +679,10 @@ function switchTab(tabId, saveToDb = false) {
     if (title) title.textContent = userName ? `${userName}'s Job Board` : 'Job Board';
     if (subtitle) subtitle.textContent = 'Manage your job search pipeline';
     if (btnAdd) btnAdd.style.display = 'inline-flex';
+  } else if (activeTab === 'metrics') {
+    if (title) title.textContent = 'Metrics & Analytics';
+    if (subtitle) subtitle.textContent = 'Track your application funnel and progress';
+    if (btnAdd) btnAdd.style.display = 'none';
   } else if (activeTab === 'calendar') {
     if (title) title.textContent = 'Events Calendar';
     if (subtitle) subtitle.textContent = 'Plan and track hiring related events';
@@ -717,6 +726,8 @@ function refreshUI() {
   if (activeTab === 'kanban') {
     renderKanbanFilters();
     renderKanbanBoard();
+  } else if (activeTab === 'metrics') {
+    renderMetricsDashboard();
   } else if (activeTab === 'calendar') {
     renderCalendar();
   } else if (activeTab === 'settings') {
@@ -724,6 +735,301 @@ function refreshUI() {
   }
 }
 
+// --- 1b. Metrics Dashboard Renderer ---
+async function renderMetricsDashboard() {
+  const container = document.getElementById('metrics-dashboard-content');
+  if (!container) return;
+  
+  if (jobs.length === 0) {
+    container.innerHTML = '<div style="color: var(--theme-text-muted);">No job data available to display metrics. Add some applications to get started!</div>';
+    return;
+  }
+
+  // Fetch all status transition logs from backend
+  const transitions = await apiFetch('/api/metrics/transitions').catch(() => []);
+
+  const totalApps = jobs.length;
+  
+  // 1. Calculate breakdown by status for Funnel & ECharts
+  const statusCounts = {};
+  statuses.forEach(s => statusCounts[s.label] = 0);
+  jobs.forEach(j => {
+    const s = statuses.find(st => st.id === j.status_id);
+    if (s) {
+      statusCounts[s.label] = (statusCounts[s.label] || 0) + 1;
+    }
+  });
+
+  let statusHTML = '';
+  let chartData = [];
+  
+  statuses.forEach(s => {
+    const count = statusCounts[s.label] || 0;
+    const percentage = totalApps > 0 ? (count / totalApps) * 100 : 0;
+    
+    // Bar graph row
+    statusHTML += `
+      <div style="margin-bottom: 12px;">
+        <div style="display: flex; justify-content: space-between; margin-bottom: 4px; font-size: 14px;">
+          <span style="display: flex; align-items: center; gap: 6px;">
+            <span style="width: 10px; height: 10px; border-radius: 50%; background: ${s.color}; display: inline-block;"></span>
+            ${s.label} (${count})
+          </span>
+          <span style="color: var(--theme-text-muted);">${Math.round(percentage)}%</span>
+        </div>
+        <div style="width: 100%; height: 8px; background: rgba(0,0,0,0.1); border-radius: 4px; overflow: hidden;">
+          <div style="height: 100%; background: ${s.color}; width: ${percentage}%;"></div>
+        </div>
+      </div>
+    `;
+    
+    if (count > 0) {
+      chartData.push({
+        value: count, 
+        name: s.label,
+        itemStyle: { color: s.color }
+      });
+    }
+  });
+
+  // 2. Dynamic Conversion Rates (Step-to-Step)
+  // Determine if a job hit a specific stage
+  const stageHits = {};
+  statuses.forEach(s => stageHits[s.label] = 0);
+  
+  jobs.forEach(j => {
+    // Current status
+    const currentStatus = statuses.find(s => s.id === j.status_id);
+    const hitLabels = new Set();
+    if (currentStatus) hitLabels.add(currentStatus.label);
+    
+    // Transition history
+    const jobTransitions = transitions.filter(t => t.job_id === j.id);
+    jobTransitions.forEach(t => {
+      const prefix = 'Application status changed to ';
+      if (t.content.startsWith(prefix)) {
+        hitLabels.add(t.content.substring(prefix.length).trim());
+      }
+    });
+    
+    // We assume if they hit a stage, they entered it. 
+    // This allows us to calculate funnel dropoff.
+    hitLabels.forEach(label => {
+      if (stageHits[label] !== undefined) stageHits[label]++;
+    });
+  });
+
+  // Generate dynamic conversion pairs based on user's status sort order
+  let conversionHTML = '';
+  for (let i = 0; i < statuses.length - 1; i++) {
+    const fromStage = statuses[i];
+    const toStage = statuses[i+1];
+    // Skip if it's "Rejected" or similar as a logical funnel step unless data dictates it?
+    // We just show all adjacent steps for full transparency.
+    const fromCount = stageHits[fromStage.label] || 0;
+    const toCount = stageHits[toStage.label] || 0;
+    const rate = fromCount > 0 ? Math.round((toCount / fromCount) * 100) : 0;
+    
+    conversionHTML += `
+      <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--theme-border);">
+        <span style="color: var(--theme-text-muted); font-size: 13px;">${fromStage.label} → ${toStage.label}</span>
+        <span style="font-weight: 700; font-size: 14px; color: ${rate > 0 ? 'var(--theme-text)' : 'var(--theme-text-muted)'};">${rate}%</span>
+      </div>
+    `;
+  }
+
+  // 3. Average Time in Status
+  const statusDurations = {}; // { 'Applied': [days, days], 'Screen': [days] }
+  statuses.forEach(s => statusDurations[s.label] = []);
+
+  let totalTransitions = 0;
+  let totalTransitionDays = 0;
+
+  jobs.forEach(j => {
+    let jobTransitions = transitions.filter(t => t.job_id === j.id);
+    
+    // Filter out "Interested" from transitions completely
+    jobTransitions = jobTransitions.filter(t => !t.content.includes('changed to Interested'));
+    
+    if (jobTransitions.length === 0) return;
+    
+    // We only begin calculation once the user has "Applied"
+    const appliedNote = jobTransitions.find(t => t.content.includes('changed to Applied'));
+    let startDate = j.created_at; // Fallback
+    
+    if (appliedNote) {
+      startDate = appliedNote.created_at;
+      // Only process transitions that happened AFTER the Applied note
+      jobTransitions = jobTransitions.filter(t => new Date(t.created_at) > new Date(startDate));
+    }
+    
+    if (jobTransitions.length === 0) return;
+    
+    let lastDate = new Date(startDate);
+    
+    jobTransitions.forEach(note => {
+      const currentDate = new Date(note.created_at);
+      const diffTime = Math.abs(currentDate - lastDate);
+      const diffDays = diffTime / (1000 * 60 * 60 * 24);
+      
+      totalTransitionDays += diffDays;
+      totalTransitions += 1;
+      lastDate = currentDate;
+    });
+  });
+
+  const avgDaysPerStage = totalTransitions > 0 ? (totalTransitionDays / totalTransitions).toFixed(1) : 'N/A';
+
+  // 4. Average time in pipeline
+  let totalPipelineDays = 0;
+  const now = new Date();
+  jobs.forEach(j => {
+    if (j.created_at) {
+      totalPipelineDays += (now - new Date(j.created_at)) / (1000 * 60 * 60 * 24);
+    }
+  });
+  const avgPipelineDays = totalApps > 0 ? (totalPipelineDays / totalApps).toFixed(1) : '0.0';
+
+  // Old hardcoded interview rates for primary KPIs
+  const interviewingStatuses = statuses.filter(s => s.label.toLowerCase().includes('interview') || s.label.toLowerCase().includes('screen')).map(s => s.id);
+  const offerStatuses = statuses.filter(s => s.label.toLowerCase().includes('offer')).map(s => s.id);
+  let totalInterviews = jobs.filter(j => interviewingStatuses.includes(j.status_id) || offerStatuses.includes(j.status_id)).length;
+  let totalOffers = jobs.filter(j => offerStatuses.includes(j.status_id)).length;
+  const interviewRate = totalApps > 0 ? Math.round((totalInterviews / totalApps) * 100) : 0;
+  const offerRate = totalInterviews > 0 ? Math.round((totalOffers / totalInterviews) * 100) : 0;
+
+  // New Metrics: Remote vs On-Site
+  const remoteCount = jobs.filter(j => j.remote).length;
+  const remotePercentage = Math.round((remoteCount / totalApps) * 100);
+  const staleCount = staleJobs.length;
+  const stalePercentage = Math.round((staleCount / totalApps) * 100);
+
+  container.innerHTML = `
+    <!-- Top Row: Primary KPIs -->
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px;">
+      <div style="background: var(--theme-card-bg); padding: 24px; border-radius: var(--radius-md); border: 1px solid var(--theme-border); text-align: center;">
+        <div style="font-size: 36px; font-weight: 700; color: var(--theme-primary);">${totalApps}</div>
+        <div style="font-size: 14px; color: var(--theme-text-muted); margin-top: 8px;">Total Applications</div>
+      </div>
+      <div style="background: var(--theme-card-bg); padding: 24px; border-radius: var(--radius-md); border: 1px solid var(--theme-border); text-align: center;">
+        <div style="font-size: 36px; font-weight: 700; color: var(--theme-secondary);">${interviewRate}%</div>
+        <div style="font-size: 14px; color: var(--theme-text-muted); margin-top: 8px;">Global Interview Rate</div>
+      </div>
+      <div style="background: var(--theme-card-bg); padding: 24px; border-radius: var(--radius-md); border: 1px solid var(--theme-border); text-align: center;">
+        <div style="font-size: 36px; font-weight: 700; color: #34d399;">${offerRate}%</div>
+        <div style="font-size: 14px; color: var(--theme-text-muted); margin-top: 8px;">Global Offer Rate</div>
+      </div>
+    </div>
+    
+    <!-- Second Row: Deep Dive Analytics -->
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px;">
+      
+      <!-- Time & Velocity -->
+      <div style="background: var(--theme-card-bg); padding: 24px; border-radius: var(--radius-md); border: 1px solid var(--theme-border); display: flex; flex-direction: column; justify-content: center;">
+        <h3 style="margin-top: 0; margin-bottom: 20px; font-size: 16px; display: flex; align-items: center; gap: 8px;">
+          <span>⏱️</span> Pipeline Velocity
+        </h3>
+        <div style="display: flex; justify-content: space-between; align-items: center; padding-bottom: 12px; border-bottom: 1px solid var(--theme-border);">
+          <span style="color: var(--theme-text-muted); font-size: 14px;">Avg. Days Between Status Updates</span>
+          <span style="font-weight: 700; font-size: 16px;">${avgDaysPerStage}</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; align-items: center; padding-top: 12px;">
+          <span style="color: var(--theme-text-muted); font-size: 14px;">Avg. Total Pipeline Age</span>
+          <span style="font-weight: 700; font-size: 16px;">${avgPipelineDays} days</span>
+        </div>
+      </div>
+
+      <!-- Step-to-Step Funnel Conversions -->
+      <div style="background: var(--theme-card-bg); padding: 24px; border-radius: var(--radius-md); border: 1px solid var(--theme-border); display: flex; flex-direction: column;">
+        <h3 style="margin-top: 0; margin-bottom: 12px; font-size: 16px; display: flex; align-items: center; gap: 8px;">
+          <span>📈</span> Custom Conversion Funnel
+        </h3>
+        <div style="padding-right: 8px;">
+          ${conversionHTML}
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Funnel Visualization (Bar + Pie) -->
+    <div style="background: var(--theme-card-bg); padding: 24px; border-radius: var(--radius-md); border: 1px solid var(--theme-border);">
+      <h3 style="margin-top: 0; margin-bottom: 24px;">Application Funnel Distribution</h3>
+      
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 48px; align-items: center;">
+        
+        <!-- Left: Bar Graph List -->
+        <div>
+          ${statusHTML}
+        </div>
+
+        <!-- Right: ECharts Pie Chart -->
+        <div style="display: flex; justify-content: center; align-items: center; padding: 20px;">
+          <div id="echarts-pie-container" style="width: 100%; height: 300px;"></div>
+        </div>
+
+      </div>
+    </div>
+  `;
+
+  // Initialize ECharts Pie Chart
+  setTimeout(() => {
+    const pieContainer = document.getElementById('echarts-pie-container');
+    if (pieContainer && window.echarts) {
+      const myChart = echarts.init(pieContainer);
+      const isDarkMode = document.documentElement.classList.contains('dark-mode');
+      
+      const option = {
+        tooltip: {
+          trigger: 'item',
+          formatter: '{b}: {c} ({d}%)',
+          backgroundColor: isDarkMode ? '#1f2937' : '#ffffff',
+          borderColor: isDarkMode ? '#374151' : '#e5e7eb',
+          textStyle: {
+            color: isDarkMode ? '#f3f4f6' : '#111827'
+          }
+        },
+        series: [
+          {
+            name: 'Status',
+            type: 'pie',
+            radius: ['40%', '70%'],
+            avoidLabelOverlap: true,
+            itemStyle: {
+              borderRadius: 10,
+              borderColor: isDarkMode ? '#111827' : '#ffffff',
+              borderWidth: 2
+            },
+            label: {
+              show: true,
+              formatter: '{b}\n{d}%',
+              color: isDarkMode ? '#f3f4f6' : '#111827',
+              fontSize: 12,
+              fontWeight: 600
+            },
+            labelLine: {
+              show: true,
+              length: 15,
+              length2: 20,
+              smooth: true,
+              lineStyle: {
+                color: isDarkMode ? '#9ca3af' : '#6b7280',
+                width: 2
+              }
+            },
+            data: chartData
+          }
+        ]
+      };
+      
+      myChart.setOption(option);
+      
+      // Handle window resize
+      window.addEventListener('resize', () => {
+        myChart.resize();
+      });
+    }
+  }, 100);
+}
 // --- 1. Kanban Board Views Renderer ---
 function renderKanbanFilters() {
   // Populate location datalist with unique locations from jobs
@@ -1553,8 +1859,8 @@ function renderSettings() {
 
     row.innerHTML = `
       <div style="display: flex; gap: 4px;">
-        <button type="button" class="calendar-nav-btn" style="width: 24px; height: 24px; opacity: ${idx === 0 ? 0.3 : 1};" onclick="shiftStatusOrder(${idx}, 'up')" ${idx === 0 ? 'disabled' : ''}>▲</button>
-        <button type="button" class="calendar-nav-btn" style="width: 24px; height: 24px; opacity: ${idx === statuses.length - 1 ? 0.3 : 1};" onclick="shiftStatusOrder(${idx}, 'down')" ${idx === statuses.length - 1 ? 'disabled' : ''}>▼</button>
+        <button type="button" class="calendar-nav-btn" style="width: 24px; height: 24px; opacity: ${idx === 0 || st.id === 1 || st.id === 2 || (idx > 0 && (statuses[idx-1].id === 1 || statuses[idx-1].id === 2)) ? 0.3 : 1};" onclick="shiftStatusOrder(${idx}, 'up')" ${idx === 0 || st.id === 1 || st.id === 2 || (idx > 0 && (statuses[idx-1].id === 1 || statuses[idx-1].id === 2)) ? 'disabled' : ''}>▲</button>
+        <button type="button" class="calendar-nav-btn" style="width: 24px; height: 24px; opacity: ${idx === statuses.length - 1 || st.id === 1 || st.id === 2 || (idx < statuses.length - 1 && (statuses[idx+1].id === 1 || statuses[idx+1].id === 2)) ? 0.3 : 1};" onclick="shiftStatusOrder(${idx}, 'down')" ${idx === statuses.length - 1 || st.id === 1 || st.id === 2 || (idx < statuses.length - 1 && (statuses[idx+1].id === 1 || statuses[idx+1].id === 2)) ? 'disabled' : ''}>▼</button>
       </div>
       <div class="color-indicator-circle" style="background-color: ${st.color}"></div>
       
@@ -1563,13 +1869,13 @@ function renderSettings() {
         <span style="font-size: 11px; color: var(--theme-text-muted); margin-right: 12px;">Order: ${st.sort_order}</span>
         <button class="btn btn-secondary btn-sm" onclick="triggerStatusEdit(${st.id}, '${escapeHTML(st.label)}', '${escapeHTML(st.color)}')">Edit</button>
       ` : `
-        <input type="text" id="status-edit-label-${st.id}" value="${escapeHTML(editingStatus.label)}" style="flex-grow: 1; padding: 4px 8px; font-size: 13px;">
+        <input type="text" id="status-edit-label-${st.id}" value="${escapeHTML(editingStatus.label)}" style="flex-grow: 1; padding: 4px 8px; font-size: 13px;" ${st.id === 1 || st.id === 2 ? 'readonly disabled title="Core statuses cannot be renamed"' : ''}>
         ${renderColorPalette('status-edit-color-' + st.id, editingStatus.color)}
         <button class="btn btn-primary btn-sm" onclick="saveStatusEdit(${st.id})">Save</button>
         <button class="btn btn-secondary btn-sm" onclick="triggerStatusEdit(null)">Cancel</button>
       `}
 
-      <button class="btn btn-danger btn-sm" onclick="deleteStatusColumn(${st.id})" data-tooltip="Delete Status" style="padding: 6px;">🗑️</button>
+      ${st.id !== 1 && st.id !== 2 ? `<button class="btn btn-danger btn-sm" onclick="deleteStatusColumn(${st.id})" data-tooltip="Delete Status" style="padding: 6px;">🗑️</button>` : `<div style="width: 32px;"></div>`}
     `;
     statusContainer.appendChild(row);
   });
@@ -1629,7 +1935,7 @@ function renderSettings() {
     });
   }
 
-  // Default status selection dropdown
+    // Default status selection dropdown
   const defaultSelect = document.getElementById('param-default-status');
   defaultSelect.innerHTML = '';
   statuses.forEach(st => {
@@ -1641,6 +1947,22 @@ function renderSettings() {
     }
     defaultSelect.appendChild(opt);
   });
+
+  // 4. Global Tasks Editor
+  const globalTaskContainer = document.getElementById('global-task-edit-list-container');
+  if (globalTaskContainer) {
+    globalTaskContainer.innerHTML = '';
+    globalTasks.forEach((gt, idx) => {
+      const row = document.createElement('div');
+      row.className = 'status-edit-row';
+      row.innerHTML = `
+
+        <strong style="flex-grow: 1; font-size: 14px;">${escapeHTML(gt.label)}</strong>
+        <button class="btn btn-secondary btn-sm" style="color: #ef4444;" onclick="deleteGlobalTask(${gt.id})">Delete</button>
+      `;
+      globalTaskContainer.appendChild(row);
+    });
+  }
 }
 
 // Toggle Theme Builder Form
@@ -1713,6 +2035,63 @@ async function handleThemeDelete(e, themeId) {
   }
 }
 
+// --- Global Tasks Managers ---
+window.deleteGlobalTask = async (taskId) => {
+  if (!await showConfirmDialog('🗑️ Delete Task', 'Are you sure you want to delete this suggested task?', 'Delete')) return;
+  try {
+    await apiFetch(`/api/global_tasks/${taskId}`, { method: 'DELETE' });
+    fetchDashboardData();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+};
+
+window.shiftGlobalTaskOrder = async (idx, direction) => {
+  if (direction === 'up' && idx === 0) return;
+  if (direction === 'down' && idx === globalTasks.length - 1) return;
+
+  const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
+  const taskA = globalTasks[idx];
+  const taskB = globalTasks[targetIdx];
+
+  try {
+    await Promise.all([
+      apiFetch(`/api/global_tasks/${taskA.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sort_order: taskB.sort_order })
+      }),
+      apiFetch(`/api/global_tasks/${taskB.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sort_order: taskA.sort_order })
+      })
+    ]);
+    fetchDashboardData();
+  } catch (err) {
+    console.error(err);
+  }
+};
+
+document.getElementById('create-global-task-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const labelInput = document.getElementById('new-global-task-label');
+  const label = labelInput.value.trim();
+  if (!label) return;
+  
+  try {
+    await apiFetch('/api/global_tasks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ label })
+    });
+    labelInput.value = '';
+    fetchDashboardData();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+});
+
 // Status re-ordering arrow updates
 async function shiftStatusOrder(idx, direction) {
   if (direction === 'up' && idx === 0) return;
@@ -1722,18 +2101,30 @@ async function shiftStatusOrder(idx, direction) {
   const statusA = statuses[idx];
   const statusB = statuses[targetIdx];
 
+  if (statusA.id === 1 || statusA.id === 2 || statusB.id === 1 || statusB.id === 2) return;
+
   const orders = [
     { id: statusA.id, sort_order: statusB.sort_order },
     { id: statusB.id, sort_order: statusA.sort_order }
   ];
 
+  // Optimistic UI Swap
+  const tempOrder = statusA.sort_order;
+  statusA.sort_order = statusB.sort_order;
+  statusB.sort_order = tempOrder;
+  
+  statuses[idx] = statusB;
+  statuses[targetIdx] = statusA;
+  
+  renderSettings(); // Instantly update UI
+
   try {
-    await apiFetch('/api/statuses/reorder', {
+    // Fire and forget API call
+    apiFetch('/api/statuses/reorder', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ orders })
     });
-    fetchDashboardData();
   } catch (err) {
     console.error(err);
   }
@@ -1833,13 +2224,23 @@ async function shiftEventTypeOrder(idx, direction) {
     { id: typeB.id, sort_order: typeA.sort_order }
   ];
 
+  // Optimistic UI Swap
+  const tempOrder = typeA.sort_order;
+  typeA.sort_order = typeB.sort_order;
+  typeB.sort_order = tempOrder;
+  
+  eventTypes[idx] = typeB;
+  eventTypes[targetIdx] = typeA;
+  
+  renderSettings(); // Instantly update UI
+
   try {
-    await apiFetch('/api/event_types/reorder', {
+    // Fire and forget API call
+    apiFetch('/api/event_types/reorder', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ orders })
     });
-    fetchDashboardData();
   } catch (err) {
     console.error(err);
   }
@@ -2004,6 +2405,7 @@ window.closeJobDetailModal = () => {
 window.openJobDetailModal = async (jobId) => {
   selectedJobId = jobId;
   isEditMode = false;
+  activeDetailTab = 'tab-overview';
   
   const modal = document.getElementById('job-detail-modal');
   modal.classList.add('active');
@@ -2019,8 +2421,19 @@ async function renderDetailModalContent() {
   const btnToggleText = document.getElementById('edit-btn-text');
 
   try {
-    const job = await apiFetch(`/api/jobs/${selectedJobId}`);
+    const [job, jobTasksData, starStoriesData] = await Promise.all([
+      apiFetch(`/api/jobs/${selectedJobId}`),
+      apiFetch(`/api/jobs/${selectedJobId}/tasks`),
+      apiFetch(`/api/jobs/${selectedJobId}/star_stories`)
+    ]);
     const isJobStale = staleJobs.some(sj => sj.id === selectedJobId);
+    let jobTasks = jobTasksData;
+    let starStories = starStoriesData;
+    
+    let prepData = { research: '', questions: '' };
+    if (job.interview_prep && job.interview_prep !== 'None') {
+      try { prepData = JSON.parse(job.interview_prep); } catch(e) {}
+    }
 
     btnToggle.style.display = 'inline-flex';
     btnToggleText.textContent = isEditMode ? 'View Mode' : 'Edit Job';
@@ -2033,8 +2446,8 @@ async function renderDetailModalContent() {
 
     if (!isEditMode) {
       // --- VIEW MODE TEMPLATE ---
-      
-      // Compute unified timeline log (notes + uploads + events)
+
+      // Compute unified timeline log (notes + uploads + PAST events)
       const feed = [];
       if (job.notes) {
         job.notes.forEach(n => {
@@ -2046,25 +2459,48 @@ async function renderDetailModalContent() {
           feed.push({ id: `file_${f.id}`, type: 'file', date: new Date(f.uploaded_at), data: f });
         });
       }
+      
+      const now = new Date();
+      const upcomingEvents = [];
+      const pastEvents = [];
       if (job.calendar_events) {
         job.calendar_events.forEach(e => {
-          feed.push({ id: `event_${e.id}`, type: 'event', date: new Date(e.start_time), data: e });
+          if (new Date(e.start_time) >= now) {
+            upcomingEvents.push(e);
+          } else {
+            pastEvents.push(e);
+            feed.push({ id: `event_${e.id}`, type: 'event', date: new Date(e.start_time), data: e });
+          }
         });
       }
+      
       // Sort reverse chronological
       feed.sort((a, b) => b.date - a.date);
 
       const hasSalary = job.salary_range && job.salary_range.trim() !== '';
       const hasOther = job.other_compensation && job.other_compensation.trim() !== '';
       
+      const uncompletedTasksCount = jobTasks.filter(t => !t.is_completed).length;
+      
       container.innerHTML = `
         <!-- Header -->
         <div class="detail-header">
-          <div class="detail-title-row" style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+          
+          <!-- Absolutely Centered Application Status -->
+          <div style="position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 10; display: flex; flex-direction: column; gap: 4px; align-items: center; text-align: center; width: 220px;">
+            <label style="font-size: 10px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--theme-text-muted); font-weight: 700; margin-bottom: 2px;">Application Status</label>
+            <select id="detail-status-select" style="border-left: 6px solid ${job.status_color}; font-weight: 700; font-size: 14px; padding: 6px 10px; border-radius: var(--radius-sm); text-align: center; width: 100%; box-shadow: 0 6px 16px rgba(0,0,0,0.25); background: var(--theme-card-bg); cursor: pointer; transition: transform 0.2s ease;" onchange="updateJobStatus(${job.id}, this.value)" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='translateY(0)'">
+              ${statuses.map(st => `
+                <option value="${st.id}" ${String(st.id) === String(job.status_id) ? 'selected' : ''}>${st.label}</option>
+              `).join('')}
+            </select>
+          </div>
+
+          <div class="detail-title-row" style="display: flex; align-items: flex-start; justify-content: flex-start; width: 100%;">
             <!-- Left Column -->
-            <div style="flex: 1; min-width: 0; padding-right: 16px;">
-              <h2>${escapeHTML(job.title)}</h2>
-              <div class="detail-org">
+            <div style="flex: 1; min-width: 0; max-width: calc(50% - 110px); padding-right: 16px;">
+              <h2 style="margin: 0; font-size: 24px; line-height: 1.2;">${escapeHTML(job.title)}</h2>
+              <div class="detail-org" style="margin-top: 8px;">
                 <span>at ${escapeHTML(job.organization_name)}</span>
                 ${(job.requisition_id && job.requisition_id !== 'None') ? `
                   <span style="background: rgba(251, 191, 36, 0.15); color: #fbbf24; border: 1px solid rgba(251, 191, 36, 0.3); padding: 1px 6px; border-radius: 4px; font-size: 11px; font-weight: 600; margin-left: 8px;">Req ID: ${escapeHTML(job.requisition_id)}</span>
@@ -2075,29 +2511,16 @@ async function renderDetailModalContent() {
                   </a>
                 ` : ''}
               </div>
-              <div style="display: flex; gap: 16px; margin-top: 8px; font-size: 13px; color: var(--theme-text-muted); flex-wrap: wrap; align-items: center;">
-                ${job.posted_date ? `<span><strong>Posted:</strong> ${formatLocalDate(job.posted_date)}</span>` : ''}
-                ${job.end_date ? `<span style="color: #fb7185; display: inline-flex; align-items: center; gap: 4px;"><strong>Closes:</strong> ${formatLocalDate(job.end_date)}</span>` : ''}
-                ${job.remote ? `<span style="background: rgba(99, 102, 241, 0.2); color: #818cf8; border: 1px solid rgba(99, 102, 241, 0.4); padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 600;">Remote</span>` : ''}
-                ${(job.location && job.location.trim() !== '' && job.location !== 'None') ? `<span><strong>Location:</strong> 📍 ${escapeHTML(job.location)}</span>` : ''}
-              </div>
             </div>
-            
-            <!-- Center Column -->
-            <div style="flex: 1; display: flex; justify-content: center; min-width: 200px;">
-              <div style="display: flex; flex-direction: column; gap: 4px; align-items: center; text-align: center; width: 200px;">
-                <label style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;">Application Status</label>
-                <select id="detail-status-select" style="border-left: 5px solid ${job.status_color}; font-weight: 600;" onchange="updateJobStatus(${job.id}, this.value)">
-                  ${statuses.map(st => `
-                    <option value="${st.id}" ${String(st.id) === String(job.status_id) ? 'selected' : ''}>${st.label}</option>
-                  `).join('')}
-                </select>
-              </div>
-            </div>
-            
-            <!-- Right Column Spacer (balancing absolute buttons) -->
-            <div style="width: 100px; flex-shrink: 0;"></div>
           </div>
+          
+          <div style="display: flex; gap: 16px; margin-top: 16px; font-size: 13px; color: var(--theme-text-muted); flex-wrap: wrap; align-items: center;">
+            ${job.posted_date ? `<span><strong>Posted:</strong> ${formatLocalDate(job.posted_date)}</span>` : ''}
+            ${job.end_date ? `<span style="color: #fb7185; display: inline-flex; align-items: center; gap: 4px;"><strong>Closes:</strong> ${formatLocalDate(job.end_date)}</span>` : ''}
+            ${job.remote ? `<span style="background: rgba(99, 102, 241, 0.2); color: #818cf8; border: 1px solid rgba(99, 102, 241, 0.4); padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 600;">Remote</span>` : ''}
+            ${(job.location && job.location.trim() !== '' && job.location !== 'None') ? `<span><strong>Location:</strong> 📍 ${escapeHTML(job.location)}</span>` : ''}
+          </div>
+          
         </div>
 
         <!-- Stale Alerts Banner -->
@@ -2118,255 +2541,360 @@ async function renderDetailModalContent() {
           </div>
         ` : ''}
 
-        <!-- Details layout grid -->
-        <div class="detail-grid">
+        <!-- TABS HEADER -->
+        <div class="modal-tabs" style="display: flex; gap: 16px; border-bottom: 1px solid var(--theme-border); margin-bottom: 24px;">
+          <button class="modal-tab-btn active" data-target="tab-overview" onclick="switchDetailTab('tab-overview')" style="background: none; border: none; border-bottom: 2px solid var(--theme-primary); padding-bottom: 8px; font-weight: 600; cursor: pointer; color: var(--theme-primary);">Overview</button>
+          <button class="modal-tab-btn" data-target="tab-tasks" onclick="switchDetailTab('tab-tasks')" style="background: none; border: none; padding-bottom: 8px; font-weight: 600; cursor: pointer; color: var(--theme-text-muted);">To-Do Tasks <span style="background: var(--theme-primary); color: white; border-radius: 10px; padding: 2px 6px; font-size: 10px; margin-left: 4px;">${uncompletedTasksCount}</span></button>
+          <button class="modal-tab-btn" data-target="tab-prep" onclick="switchDetailTab('tab-prep')" style="background: none; border: none; padding-bottom: 8px; font-weight: 600; cursor: pointer; color: var(--theme-text-muted);">Interview Prep</button>
+          <button class="modal-tab-btn" data-target="tab-timeline" onclick="switchDetailTab('tab-timeline')" style="background: none; border: none; padding-bottom: 8px; font-weight: 600; cursor: pointer; color: var(--theme-text-muted);">Timeline & Notes</button>
+        </div>
+
+        <!-- TAB CONTENT: OVERVIEW -->
+        <div id="tab-overview" class="modal-tab-pane" style="display: block;">
+          <div class="detail-grid">
+            <div class="detail-main">
+              <div style="display: flex; flex-direction: column; gap: 16px; background: rgba(0,0,0,0.1); padding: 20px; border-radius: var(--radius-md); border: 1px solid var(--theme-border);">
+                ${job.description ? `<div><strong style="font-size: 12px; color: var(--theme-text-muted); text-transform: uppercase;">Job Description / Responsibilities:</strong><p style="font-size: 14px; white-space: pre-wrap; margin-top: 4px; line-height: 1.6;">${escapeHTML(job.description)}</p></div>` : ''}
+                ${job.required_experience ? `<div><strong style="font-size: 12px; color: var(--theme-text-muted); text-transform: uppercase;">Required Experience:</strong><p style="font-size: 14px; white-space: pre-wrap; margin-top: 4px; line-height: 1.5;">${escapeHTML(job.required_experience)}</p></div>` : ''}
+                ${job.preferred_experience ? `<div><strong style="font-size: 12px; color: var(--theme-text-muted); text-transform: uppercase;">Preferred Experience:</strong><p style="font-size: 14px; white-space: pre-wrap; margin-top: 4px; line-height: 1.5;">${escapeHTML(job.preferred_experience)}</p></div>` : ''}
+                ${hasSalary ? `<div><strong style="font-size: 12px; color: var(--theme-text-muted); text-transform: uppercase;">Salary Range:</strong><div style="font-size: 15px; font-weight: 500; margin-top: 2px;">${escapeHTML(job.salary_range)}</div></div>` : ''}
+                ${hasOther ? `<div><strong style="font-size: 12px; color: var(--theme-text-muted); text-transform: uppercase;">Other Compensation:</strong><div style="font-size: 14px; margin-top: 2px;">${escapeHTML(job.other_compensation)}</div></div>` : ''}
+              </div>
+            </div>
+
+            <div class="detail-sidebar">
+              <!-- Tasks Summary Widget -->
+              <div>
+                <div class="detail-section-title">
+                  <span>Upcoming Tasks</span>
+                  <button class="btn btn-secondary btn-sm" style="padding: 2px 8px;" onclick="switchDetailTab('tab-tasks')">View All</button>
+                </div>
+                <div class="contacts-list" style="margin-bottom: 16px;">
+                  ${jobTasks.filter(t => !t.is_completed).slice(0, 3).map(t => `
+                    <div style="font-size: 12px; padding: 6px; background: rgba(0,0,0,0.1); border-radius: 4px; margin-bottom: 4px;">▢ ${escapeHTML(t.label)}</div>
+                  `).join('')}
+                  ${jobTasks.filter(t => !t.is_completed).length === 0 ? '<div style="font-size: 12px; color: var(--theme-text-muted); text-align: center; padding: 8px 0;">All caught up!</div>' : ''}
+                </div>
+              </div>
+
+              <!-- Contacts Widget -->
+              <div>
+                <div class="detail-section-title">
+                  <span>Contacts</span>
+                  <button class="btn btn-secondary btn-sm" style="padding: 2px 8px;" onclick="toggleWidgetForm('contact-widget-form')">👤+</button>
+                </div>
+                <form id="contact-widget-form" style="display: none; background: rgba(0,0,0,0.15); padding: 12px; border-radius: var(--radius-sm); margin-bottom: 16px; display: none; flex-direction: column; gap: 8px;" onsubmit="submitJobContact(event, ${job.id})">
+                  <input type="text" id="contact-name-input" placeholder="Name" required style="padding: 6px 10px; font-size: 13px;">
+                  <input type="email" id="contact-email-input" placeholder="Email" style="padding: 6px 10px; font-size: 13px;">
+                  <input type="text" id="contact-phone-input" placeholder="Phone" style="padding: 6px 10px; font-size: 13px;">
+                  <div style="display: flex; justify-content: flex-end; gap: 6px;">
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="toggleWidgetForm('contact-widget-form', false)">Cancel</button>
+                    <button type="submit" class="btn btn-primary btn-sm">Save</button>
+                  </div>
+                </form>
+                <div class="contacts-list">
+                  ${job.contacts.length > 0 ? job.contacts.map(c => `
+                    <div class="contact-item" style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+                      <div style="flex-grow: 1; min-width: 0;">
+                        <div class="contact-name" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHTML(c.name)}</div>
+                        ${(c.email || c.phone) ? `
+                          <div class="contact-details" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                            ${c.email ? `<div>${escapeHTML(c.email)}</div>` : ''}
+                            ${c.phone ? `<div>${escapeHTML(parseAndFormatPhone(c.phone))}</div>` : ''}
+                          </div>
+                        ` : ''}
+                      </div>
+                      <button class="btn btn-secondary btn-sm" style="padding: 2px 6px; font-size: 10px; flex-shrink: 0;" onclick="openEditContactModal(${c.id}, ${job.id})">✏️</button>
+                    </div>
+                  `).join('') : '<div style="font-size: 12px; color: var(--theme-text-muted); text-align: center; padding: 12px 0;">No contacts.</div>'}
+                </div>
+              </div>
+
+              <!-- Uploads Widget -->
+              <div style="margin-top: 16px;">
+                <div class="detail-section-title">
+                  <span>Uploaded Files</span>
+                  <button class="btn btn-secondary btn-sm" style="padding: 2px 8px;" onclick="triggerFilePicker()">📎+</button>
+                  <input type="file" id="job-file-picker" style="display: none;" accept=".pdf,.docx" onchange="uploadJobFile(${job.id})">
+                </div>
+                <div class="files-list">
+                  ${job.files.length > 0 ? job.files.map(f => `
+                    <div class="file-row" style="padding: 6px 10px; font-size: 12px;">
+                      <span class="file-name" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px;" data-tooltip="${escapeHTML(f.original_name)}">${escapeHTML(f.original_name)}</span>
+                      <div style="display: flex; gap: 8px; align-items: center;">
+                        <a href="/api/files/download/${f.stored_name}" download class="file-download-icon">⬇️</a>
+                        <button class="btn btn-link btn-sm" onclick="deleteJobFile(${f.id}, ${job.id})" style="padding: 0; background: none; border: none; cursor: pointer; font-size: 12px;">🗑️</button>
+                      </div>
+                    </div>
+                  `).join('') : '<div style="font-size: 12px; color: var(--theme-text-muted); text-align: center; padding: 12px 0;">No files.</div>'}
+                </div>
+              </div>
+
+              <!-- Upcoming Schedule Widget -->
+              <div style="margin-top: 16px;">
+                <div class="detail-section-title">
+                  <span>Upcoming Events</span>
+                  <button class="btn btn-secondary btn-sm" style="padding: 2px 8px;" onclick="toggleWidgetForm('schedule-widget-form')">📅+</button>
+                </div>
+                
+                <form id="schedule-widget-form" style="display: none; background: rgba(0,0,0,0.15); padding: 12px; border-radius: var(--radius-sm); margin-bottom: 16px; flex-direction: column; gap: 8px;" onsubmit="submitJobSchedule(event, ${job.id})">
+                  <div>
+                    <select id="sch-type" required style="padding: 6px 10px; font-size: 13px; width: 100%;">
+                      <option value="">-- Event Type --</option>
+                      ${eventTypes.map(t => `<option value="${t.id}">${escapeHTML(t.label)}</option>`).join('')}
+                    </select>
+                  </div>
+                  <div style="display: flex; gap: 8px;">
+                    <input type="date" id="sch-start-date" required style="flex: 1; padding: 6px 10px; font-size: 13px;">
+                    <input type="text" id="sch-start-time" class="time-picker-input" placeholder="09:30 AM" required style="flex: 1; padding: 6px 10px; font-size: 13px;">
+                  </div>
+                  <div style="display: flex; gap: 8px;">
+                    <input type="date" id="sch-end-date" required style="flex: 1; padding: 6px 10px; font-size: 13px;">
+                    <input type="text" id="sch-end-time" class="time-picker-input" placeholder="10:00 AM" required style="flex: 1; padding: 6px 10px; font-size: 13px;">
+                  </div>
+                  <div>
+                    <select id="sch-tz" required style="padding: 6px 10px; font-size: 13px; width: 100%;">
+                      ${timezones.map(tz => `<option value="${tz.name}" ${tz.name === (settings.default_timezone || 'America/Los_Angeles') ? 'selected' : ''}>${escapeHTML(tz.label)}</option>`).join('')}
+                    </select>
+                  </div>
+                  <label style="font-size: 12px; cursor: pointer; display: flex; align-items: center; gap: 6px;">
+                    <input type="checkbox" id="sch-tentative" checked> Is Tentative?
+                  </label>
+                  <textarea id="sch-desc" placeholder="Event Description..." required style="padding: 6px 10px; font-size: 13px; width: 100%; min-height: 50px;"></textarea>
+                  <div style="display: flex; justify-content: flex-end; gap: 6px;">
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="toggleWidgetForm('schedule-widget-form', false)">Cancel</button>
+                    <button type="submit" class="btn btn-primary btn-sm">Schedule</button>
+                  </div>
+                </form>
+
+                <div class="events-list">
+                  ${upcomingEvents.length > 0 ? upcomingEvents.map(e => `
+                    <div class="contact-item" style="font-size: 12px; border-left: 3px solid ${e.is_tentative ? '#fbbf24' : '#10b981'}; display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+                      <div>
+                        <strong>${escapeHTML(e.description || 'Schedule Event')}</strong>
+                        <div style="font-size: 11px; color: var(--theme-text-muted); margin-top: 2px;">
+                          ${parseTzNaive(e.start_time).toLocaleDateString()} at ${parseTzNaive(e.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} (${e.timezone})
+                        </div>
+                      </div>
+                      <button class="btn btn-secondary btn-sm" style="padding: 2px 6px; font-size: 10px;" onclick="openEditEventModal(${e.id}, ${job.id})">✏️</button>
+                    </div>
+                  `).join('') : '<div style="font-size: 12px; color: var(--theme-text-muted); text-align: center; padding: 12px 0;">No upcoming events.</div>'}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB CONTENT: TASKS -->
+        <div id="tab-tasks" class="modal-tab-pane" style="display: none;">
+          <h3 class="detail-section-title" style="margin-bottom: 16px;">To-Do Checklist</h3>
           
-          <!-- Left Column (Description, Note adding, timeline log) -->
-          <div class="detail-main">
-            
-            <div style="display: flex; flex-direction: column; gap: 16px; background: rgba(0,0,0,0.1); padding: 20px; border-radius: var(--radius-md); border: 1px solid var(--theme-border);">
-              ${job.description ? `<div><strong style="font-size: 12px; color: var(--theme-text-muted); text-transform: uppercase;">Job Description / Responsibilities:</strong><p style="font-size: 14px; white-space: pre-wrap; margin-top: 4px; line-height: 1.6;">${escapeHTML(job.description)}</p></div>` : ''}
-              ${job.required_experience ? `<div><strong style="font-size: 12px; color: var(--theme-text-muted); text-transform: uppercase;">Required Experience:</strong><p style="font-size: 14px; white-space: pre-wrap; margin-top: 4px; line-height: 1.5;">${escapeHTML(job.required_experience)}</p></div>` : ''}
-              ${job.preferred_experience ? `<div><strong style="font-size: 12px; color: var(--theme-text-muted); text-transform: uppercase;">Preferred Experience:</strong><p style="font-size: 14px; white-space: pre-wrap; margin-top: 4px; line-height: 1.5;">${escapeHTML(job.preferred_experience)}</p></div>` : ''}
-              ${hasSalary ? `<div><strong style="font-size: 12px; color: var(--theme-text-muted); text-transform: uppercase;">Salary Range:</strong><div style="font-size: 15px; font-weight: 500; margin-top: 2px;">${escapeHTML(job.salary_range)}</div></div>` : ''}
-              ${hasOther ? `<div><strong style="font-size: 12px; color: var(--theme-text-muted); text-transform: uppercase;">Other Compensation:</strong><div style="font-size: 14px; margin-top: 2px;">${escapeHTML(job.other_compensation)}</div></div>` : ''}
-            </div>
-
-            <!-- Notes Adding box -->
-            <div>
-              <h3 class="detail-section-title">Add Update Note</h3>
-              <form id="note-submit-form" class="note-input-box" onsubmit="submitJobNote(event, ${job.id})">
-                <div>
-                  <label style="font-size: 11px; display: block; margin-bottom: 4px;">Note Originator</label>
-                  <select id="note-originator-select" style="padding: 8px 12px; width: 220px;">
-                    <option value="none"></option>
-                    <option value="user">User (Me)</option>
-                    <option value="other_generic">Other Representative</option>
-                    ${job.contacts.map(c => `
-                      <option value="contact_${c.id}">${escapeHTML(c.name)} (Contact)</option>
-                    `).join('')}
-                  </select>
-                </div>
-                <textarea id="note-content-input" placeholder="Type details of your email exchange, feedback, or logs..." required></textarea>
-                <button type="submit" class="btn btn-primary btn-sm" style="align-self: flex-end;">Save Note</button>
-              </form>
-            </div>
-
-            <!-- Combined Log Feed -->
-            <div>
-              <h3 class="detail-section-title">Activity & Updates Feed</h3>
-              <div class="notes-container">
-                ${feed.length > 0 ? feed.map(item => {
-                  if (item.type === 'note') {
-                    let author = '';
-                    if (item.data.originator_type === 'user') author = 'User (Me)';
-                    else if (item.data.originator_type === 'recruiter') author = item.data.contact_name ? `${escapeHTML(item.data.contact_name)}` : '';
-                    else if (item.data.originator_type === 'other') author = 'Other Representative';
-
-                    return `
-                      <div class="note-card" id="note-card-${item.data.id}">
-                        <div class="note-header" style="display: flex; justify-content: space-between; align-items: center;">
-                          <div style="display: flex; align-items: center; gap: 8px;">
-                            ${author ? `<span class="note-originator" style="color: ${item.data.originator_type === 'user' ? 'var(--theme-secondary)' : 'var(--theme-primary)'}">${author}</span>` : ''}
-                            <button class="btn btn-secondary btn-sm" style="padding: 2px 6px; font-size: 10px; line-height: 1;" onclick="enterNoteEditMode(${item.data.id})">✏️ Edit</button>
-                          </div>
-                          <span>${new Date(item.data.created_at).toLocaleString()}</span>
-                        </div>
-                        
-                        <!-- View mode -->
-                        <div id="note-view-${item.data.id}">
-                          <div class="note-body">${escapeHTML(item.data.content)}</div>
-                        </div>
-                        
-                        <!-- Edit mode -->
-                        <div id="note-edit-${item.data.id}" style="display: none; margin-top: 8px;">
-                          <textarea id="note-edit-textarea-${item.data.id}" style="width: 100%; min-height: 80px; padding: 8px; margin-bottom: 8px; font-family: var(--font-body); font-size: 13px; background: rgba(0,0,0,0.3); color: var(--theme-text); border: 1px solid var(--theme-border); border-radius: var(--radius-sm); resize: vertical;">${escapeHTML(item.data.content)}</textarea>
-                           <div style="display: flex; justify-content: space-between; align-items: center;">
-                            <button class="btn btn-danger btn-sm" style="padding: 4px 8px; font-size: 11px;" onclick="deleteJobNote(${item.data.id}, ${job.id})">Delete Note</button>
-                            <div style="display: flex; gap: 8px;">
-                              <button class="btn btn-secondary btn-sm" style="padding: 4px 8px; font-size: 11px;" onclick="cancelNoteEditMode(${item.data.id})">Cancel</button>
-                              <button class="btn btn-primary btn-sm" style="padding: 4px 8px; font-size: 11px;" onclick="saveNoteEdit(${item.data.id}, ${job.id})">Save</button>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    `;
-                  } else if (item.type === 'file') {
-                    return `
-                      <div class="file-row">
-                        <div class="file-name">
-                          <span style="margin-right: 6px; color: var(--theme-secondary);">📄</span>
-                          <span>${escapeHTML(item.data.original_name)}</span>
-                        </div>
-                        <div style="display: flex; align-items: center; gap: 12px;">
-                          <span style="font-size: 11px; color: var(--theme-text-muted);">${new Date(item.data.uploaded_at).toLocaleDateString()}</span>
-                          <a href="/api/files/download/${item.data.stored_name}" download class="file-download-icon" data-tooltip="Download">⬇️</a>
-                        </div>
-                      </div>
-                    `;
-                  } else if (item.type === 'event') {
-                    const color = item.data.is_tentative ? '#fbbf24' : '#10b981';
-                    return `
-                      <div class="file-row" style="border-left: 4px solid var(--theme-primary)">
-                        <div class="file-name">
-                          <span style="margin-right: 6px; color: var(--theme-primary);">📅</span>
-                          <div>
-                            <strong>${escapeHTML(item.data.description || 'Schedule Window')}</strong>
-                            <div style="font-size: 11px; color: var(--theme-text-muted);">
-                              ${formatEventDateTime(item.data.start_time)} to ${formatEventDateTime(item.data.end_time)} (${item.data.timezone})
-                            </div>
-                          </div>
-                        </div>
-                        <span class="badge-stale" style="background: rgba(0,0,0,0.2); color: ${color}; border-color: ${color};">${item.data.is_tentative ? 'Tentative' : 'Confirmed'}</span>
-                      </div>
-                    `;
-                  }
-                  return '';
-                }).join('') : `
-                  <div style="color: var(--theme-text-muted); font-size: 14px; text-align: center; padding: 24px 0;">No updates logged.</div>
-                `}
-              </div>
-            </div>
-
+          <div style="display: flex; gap: 8px; margin-bottom: 16px;">
+            <input type="text" id="new-task-input" placeholder="Type a new task and press Enter..." style="flex-grow: 1; padding: 10px; border-radius: var(--radius-sm); border: 1px solid var(--theme-border); background: rgba(0,0,0,0.1); color: var(--theme-text);">
+            <button class="btn btn-primary" onclick="submitNewTask(${job.id})">Add Task</button>
+          </div>
+          
+          <div style="margin-bottom: 24px; display: flex; flex-wrap: wrap; gap: 8px;">
+            <span style="font-size: 12px; color: var(--theme-text-muted); display: flex; align-items: center;">Suggestions:</span>
+            ${[
+              "Send post-interview thank you email",
+              "Follow up on application status (after 1-2 weeks)",
+              "Research company culture and recent news",
+              "Compile portfolio / work samples"
+            ].map(sug => `
+              <button class="btn btn-secondary btn-sm" style="border-radius: 20px; font-size: 11px; padding: 2px 10px;" onclick="addSuggestedTask(${job.id}, '${escapeHTML(sug)}')">+ ${escapeHTML(sug)}</button>
+            `).join('')}
           </div>
 
-          <!-- Right Column Widgets (Contacts, Files, Calendar Windows) -->
-          <div class="detail-sidebar">
-            
-            <!-- Contacts Widget -->
-            <div>
-              <div class="detail-section-title">
-                <span>Contacts</span>
-                <button class="btn btn-secondary btn-sm" style="padding: 2px 8px;" onclick="toggleWidgetForm('contact-widget-form')">👤+</button>
+          <div id="job-tasks-list-container" style="display: flex; flex-direction: column; gap: 8px;">
+            ${jobTasks.length > 0 ? jobTasks.map(t => `
+              <div style="display: flex; align-items: center; gap: 12px; padding: 12px; background: rgba(0,0,0,0.05); border: 1px solid var(--theme-border); border-radius: var(--radius-sm);">
+                <input type="checkbox" ${t.is_completed ? 'checked' : ''} style="width: 18px; height: 18px; cursor: pointer;" onchange="toggleJobTask(${job.id}, ${t.id}, this.checked)">
+                <span style="flex-grow: 1; font-size: 14px; text-decoration: ${t.is_completed ? 'line-through' : 'none'}; color: ${t.is_completed ? 'var(--theme-text-muted)' : 'var(--theme-text)'};">${escapeHTML(t.label)}</span>
+                <button class="btn btn-link btn-sm" style="color: #ef4444; padding: 4px;" onclick="deleteJobTask(${job.id}, ${t.id})">🗑️</button>
               </div>
+            `).join('') : '<div style="color: var(--theme-text-muted); font-size: 14px;">No tasks.</div>'}
+          </div>
+        </div>
+
+        <!-- TAB CONTENT: INTERVIEW PREP -->
+        <div id="tab-prep" class="modal-tab-pane" style="display: none;">
+          <div style="display: grid; grid-template-columns: 1fr; gap: 24px;">
+            
+            <!-- Company Research -->
+            <div style="background: rgba(0,0,0,0.1); border-radius: var(--radius-md); border: 1px solid var(--theme-border); padding: 20px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                <h3 class="detail-section-title" style="margin: 0;">Company Research</h3>
+                <div id="prep-research-btns-view">
+                  <button class="btn btn-secondary btn-sm" onclick="enterPrepEditMode('research')">✏️ Edit</button>
+                </div>
+                <div id="prep-research-btns-edit" style="display: none; gap: 8px;">
+                  <button class="btn btn-secondary btn-sm" onclick="cancelPrepEditMode('research')">Cancel</button>
+                  <button class="btn btn-primary btn-sm" onclick="saveInterviewPrepField(${job.id}, 'research')">Save</button>
+                </div>
+              </div>
+              <div id="prep-research-view" style="font-size: 14px; white-space: pre-wrap; line-height: 1.5;">${prepData.research ? escapeHTML(prepData.research) : '<span style="color: var(--theme-text-muted);">No research notes added.</span>'}</div>
+              <textarea id="prep-research-edit" placeholder="Mission, values, key products, recent news..." style="display: none; width: 100%; min-height: 120px; padding: 12px; font-size: 14px; background: var(--theme-card-bg); border: 1px solid var(--theme-border); color: var(--theme-text); border-radius: var(--radius-sm); resize: vertical;">${escapeHTML(prepData.research || '')}</textarea>
+            </div>
+
+            <!-- Questions to Ask Them -->
+            <div style="background: rgba(0,0,0,0.1); border-radius: var(--radius-md); border: 1px solid var(--theme-border); padding: 20px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                <h3 class="detail-section-title" style="margin: 0;">Questions to Ask Them</h3>
+                <div id="prep-questions-btns-view">
+                  <button class="btn btn-secondary btn-sm" onclick="enterPrepEditMode('questions')">✏️ Edit</button>
+                </div>
+                <div id="prep-questions-btns-edit" style="display: none; gap: 8px;">
+                  <button class="btn btn-secondary btn-sm" onclick="cancelPrepEditMode('questions')">Cancel</button>
+                  <button class="btn btn-primary btn-sm" onclick="saveInterviewPrepField(${job.id}, 'questions')">Save</button>
+                </div>
+              </div>
+              <div id="prep-questions-view" style="font-size: 14px; white-space: pre-wrap; line-height: 1.5;">${prepData.questions ? escapeHTML(prepData.questions) : '<span style="color: var(--theme-text-muted);">No questions added.</span>'}</div>
+              <textarea id="prep-questions-edit" placeholder="1. What does success look like in the first 90 days?..." style="display: none; width: 100%; min-height: 120px; padding: 12px; font-size: 14px; background: var(--theme-card-bg); border: 1px solid var(--theme-border); color: var(--theme-text); border-radius: var(--radius-sm); resize: vertical;">${escapeHTML(prepData.questions || '')}</textarea>
+            </div>
+
+            <!-- STAR Stories Vault -->
+            <div style="background: rgba(0,0,0,0.1); border-radius: var(--radius-md); border: 1px solid var(--theme-border); padding: 20px;">
+              <h3 class="detail-section-title" style="margin-bottom: 16px;">STAR Stories Vault</h3>
+              <p style="font-size: 12px; color: var(--theme-text-muted); margin-top: -8px; margin-bottom: 16px;">Situation, Task, Action, Result. Create discrete flashcard stories below.</p>
               
-              <form id="contact-widget-form" style="display: none; background: rgba(0,0,0,0.15); padding: 12px; border-radius: var(--radius-sm); margin-bottom: 16px; display: none; flex-direction: column; gap: 8px;" onsubmit="submitJobContact(event, ${job.id})">
-                <input type="text" id="contact-name-input" placeholder="Name" required style="padding: 6px 10px; font-size: 13px;">
-                <input type="email" id="contact-email-input" placeholder="Email" style="padding: 6px 10px; font-size: 13px;">
-                <input type="text" id="contact-phone-input" placeholder="Phone" style="padding: 6px 10px; font-size: 13px;">
-                <div style="display: flex; justify-content: flex-end; gap: 6px;">
-                  <button type="button" class="btn btn-secondary btn-sm" onclick="toggleWidgetForm('contact-widget-form', false)">Cancel</button>
-                  <button type="submit" class="btn btn-primary btn-sm">Save</button>
-                </div>
-              </form>
-
-              <div class="contacts-list">
-                ${job.contacts.length > 0 ? job.contacts.map(c => `
-                  <div class="contact-item" style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
-                    <div style="flex-grow: 1; min-width: 0;">
-                      <div class="contact-name" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHTML(c.name)}</div>
-                      ${(c.email || c.phone) ? `
-                        <div class="contact-details" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                          ${c.email ? `<div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHTML(c.email)}</div>` : ''}
-                          ${c.phone ? `<div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHTML(parseAndFormatPhone(c.phone))}</div>` : ''}
+              <div style="display: flex; flex-direction: column; gap: 16px; margin-bottom: 24px;">
+                ${starStories.map(ss => `
+                  <div style="background: var(--theme-card-bg); border: 1px solid var(--theme-border); border-radius: var(--radius-md); padding: 16px;">
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
+                      <strong style="font-size: 15px; color: var(--theme-primary);">${escapeHTML(ss.topic)}</strong>
+                      <button class="btn btn-secondary btn-sm" style="padding: 2px 6px; font-size: 10px; line-height: 1;" onclick="enterStarEditMode(${ss.id})">✏️ Edit</button>
+                    </div>
+                    
+                    <!-- View mode -->
+                    <div id="star-view-${ss.id}" style="font-size: 14px; white-space: pre-wrap; line-height: 1.5;">${escapeHTML(ss.story)}</div>
+                    
+                    <!-- Edit mode -->
+                    <div id="star-edit-${ss.id}" style="display: none;">
+                      <textarea id="star-edit-textarea-${ss.id}" style="width: 100%; min-height: 100px; padding: 8px; margin-bottom: 8px; font-family: var(--font-body); font-size: 13px; background: rgba(0,0,0,0.3); color: var(--theme-text); border: 1px solid var(--theme-border); border-radius: var(--radius-sm); resize: vertical;">${escapeHTML(ss.story)}</textarea>
+                      <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <button class="btn btn-danger btn-sm" style="padding: 4px 8px; font-size: 11px;" onclick="deleteStarStory(${job.id}, ${ss.id})">Delete Story</button>
+                        <div style="display: flex; gap: 8px;">
+                          <button class="btn btn-secondary btn-sm" style="padding: 4px 8px; font-size: 11px;" onclick="cancelStarEditMode(${ss.id})">Cancel</button>
+                          <button class="btn btn-primary btn-sm" style="padding: 4px 8px; font-size: 11px;" onclick="saveStarStoryEdit(${job.id}, ${ss.id})">Save</button>
                         </div>
-                      ` : ''}
-                    </div>
-                    <button class="btn btn-secondary btn-sm" style="padding: 2px 6px; font-size: 10px; flex-shrink: 0;" onclick="openEditContactModal(${c.id}, ${job.id})">✏️</button>
-                  </div>
-                `).join('') : '<div style="font-size: 12px; color: var(--theme-text-muted); text-align: center; padding: 12px 0;">No contacts.</div>'}
-              </div>
-            </div>
-
-            <!-- Uploads Widget -->
-            <div>
-              <div class="detail-section-title">
-                <span>Uploaded Files / Resume</span>
-                <button class="btn btn-secondary btn-sm" style="padding: 2px 8px;" onclick="triggerFilePicker()">📎+</button>
-                <input type="file" id="job-file-picker" style="display: none;" accept=".pdf,.docx" onchange="uploadJobFile(${job.id})">
-              </div>
-              <div style="font-size: 11px; color: var(--theme-text-muted); margin-top: -8px; margin-bottom: 8px;">Supports .pdf & .docx files</div>
-
-              <div class="files-list">
-                ${job.files.length > 0 ? job.files.map(f => `
-                  <div class="file-row" style="padding: 6px 10px; font-size: 12px;">
-                    <span class="file-name" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px;" data-tooltip="${escapeHTML(f.original_name)}">${escapeHTML(f.original_name)}</span>
-                    <div style="display: flex; gap: 8px; align-items: center;">
-                      <a href="/api/files/download/${f.stored_name}" download class="file-download-icon" data-tooltip="Download">⬇️</a>
-                      <button class="btn btn-link btn-sm" onclick="deleteJobFile(${f.id}, ${job.id})" data-tooltip="Delete Attachment" style="padding: 0; background: none; border: none; cursor: pointer; font-size: 12px; line-height: 1;">🗑️</button>
-                    </div>
-                  </div>
-                `).join('') : '<div style="font-size: 12px; color: var(--theme-text-muted); text-align: center; padding: 12px 0;">No files uploaded.</div>'}
-              </div>
-            </div>
-
-            <!-- Schedule Widget -->
-            <div>
-              <div class="detail-section-title">
-                <span>Calendar Windows</span>
-                <button class="btn btn-secondary btn-sm" style="padding: 2px 8px;" onclick="toggleWidgetForm('schedule-widget-form')">📅+</button>
-              </div>
-
-              <form id="schedule-widget-form" style="display: none; background: rgba(0,0,0,0.15); padding: 12px; border-radius: var(--radius-sm); margin-bottom: 16px; flex-direction: column; gap: 8px;" onsubmit="submitJobSchedule(event, ${job.id})">
-                <div>
-                  <label style="font-size: 10px; display: block; margin-bottom: 4px;">Event Type *</label>
-                  <select id="sch-type" required style="padding: 6px 10px; font-size: 13px; width: 100%;">
-                    <option value="">-- Select Event Type --</option>
-                    ${eventTypes.map(t => `<option value="${t.id}">${escapeHTML(t.label)}</option>`).join('')}
-                  </select>
-                </div>
-                <div style="display: flex; gap: 8px;">
-                  <div style="flex: 1;">
-                    <label style="font-size: 10px; display: block; margin-bottom: 4px;">Start Date</label>
-                    <input type="date" id="sch-start-date" required style="padding: 6px 10px; font-size: 13px;">
-                  </div>
-                  <div style="flex: 1;">
-                    <label style="font-size: 10px; display: block; margin-bottom: 4px;">Start Time</label>
-                    <input type="text" id="sch-start-time" class="time-picker-input" placeholder="e.g. 09:30 AM" autocomplete="off" required style="padding: 6px 10px; font-size: 13px;">
-                  </div>
-                </div>
-                <div style="display: flex; gap: 8px;">
-                  <div style="flex: 1;">
-                    <label style="font-size: 10px; display: block; margin-bottom: 4px;">End Date</label>
-                    <input type="date" id="sch-end-date" required style="padding: 6px 10px; font-size: 13px;">
-                  </div>
-                  <div style="flex: 1;">
-                    <label style="font-size: 10px; display: block; margin-bottom: 4px;">End Time</label>
-                    <input type="text" id="sch-end-time" class="time-picker-input" placeholder="e.g. 10:00 AM" autocomplete="off" required style="padding: 6px 10px; font-size: 13px;">
-                  </div>
-                </div>
-                <div>
-                  <label style="font-size: 10px; display: block; margin-bottom: 4px;">Time Zone *</label>
-                  <select id="sch-tz" required style="padding: 6px 10px; font-size: 13px; width: 100%;">
-                    <option value="">-- Select Time Zone --</option>
-                    ${timezones.map(tz => `<option value="${tz.name}" ${tz.name === (settings.default_timezone || 'America/Los_Angeles') ? 'selected' : ''}>${escapeHTML(tz.label)}</option>`).join('')}
-                  </select>
-                </div>
-                <label style="display: flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer; width: fit-content;">
-                  <input type="checkbox" id="sch-tentative" checked style="width: auto; cursor: pointer;"> Is Tentative?
-                </label>
-                <div>
-                  <label style="font-size: 10px; display: block; margin-bottom: 4px;">Event Description *</label>
-                  <textarea id="sch-desc" placeholder="Event Description (e.g. Panel Screen)" required style="padding: 6px 10px; font-size: 13px; width: 100%; box-sizing: border-box; resize: vertical; min-height: 80px;" rows="3"></textarea>
-                </div>
-                <div style="display: flex; justify-content: flex-end; gap: 6px; margin-top: 4px;">
-                  <button type="button" class="btn btn-secondary btn-sm" onclick="toggleWidgetForm('schedule-widget-form', false)">Cancel</button>
-                  <button type="submit" class="btn btn-primary btn-sm">Schedule</button>
-                </div>
-              </form>
-
-              <div class="events-list">
-                ${job.calendar_events.length > 0 ? job.calendar_events.map(e => `
-                  <div class="contact-item" style="font-size: 12px; border-left: 3px solid ${e.is_tentative ? '#fbbf24' : '#10b981'}; display: flex; justify-content: space-between; align-items: center; gap: 8px;">
-                    <div>
-                      <strong>${escapeHTML(e.description || 'Schedule Event')}</strong>
-                      <div style="font-size: 11px; color: var(--theme-text-muted); margin-top: 2px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
-                        <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background-color: ${e.event_type_color || '#6b7280'};"></span>
-                        <span>${escapeHTML(e.event_type_label || 'Event')}</span>
-                        <span>•</span>
-                        <span>${parseTzNaive(e.start_time).toLocaleDateString()} at ${parseTzNaive(e.start_time).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })} (${e.timezone})</span>
                       </div>
                     </div>
-                    <button class="btn btn-secondary btn-sm" style="padding: 2px 6px; font-size: 10px;" onclick="openEditEventModal(${e.id}, ${job.id})">✏️</button>
                   </div>
-                `).join('') : '<div style="font-size: 12px; color: var(--theme-text-muted); text-align: center; padding: 12px 0;">No events.</div>'}
+                `).join('')}
+                ${starStories.length === 0 ? '<div style="font-size: 13px; color: var(--theme-text-muted);">No STAR stories added yet.</div>' : ''}
               </div>
+
+              <form style="background: rgba(0,0,0,0.05); padding: 16px; border-radius: var(--radius-sm); border: 1px dashed var(--theme-border);" onsubmit="submitStarStory(event, ${job.id})">
+                <h4 style="margin: 0 0 12px 0; font-size: 14px;">+ Add New STAR Story</h4>
+                <input type="text" id="star-topic" placeholder="Topic (e.g. Handling Conflict)" required style="width: 100%; padding: 8px; margin-bottom: 12px; font-size: 14px; background: var(--theme-card-bg); border: 1px solid var(--theme-border); color: var(--theme-text); border-radius: var(--radius-sm);">
+                <textarea id="star-story" placeholder="Situation: ...\nTask: ...\nAction: ...\nResult: ..." required style="width: 100%; min-height: 100px; padding: 8px; margin-bottom: 12px; font-size: 14px; background: var(--theme-card-bg); border: 1px solid var(--theme-border); color: var(--theme-text); border-radius: var(--radius-sm); resize: vertical;"></textarea>
+                <div style="text-align: right;">
+                  <button type="submit" class="btn btn-primary btn-sm">Save Story</button>
+                </div>
+              </form>
             </div>
 
           </div>
+        </div>
 
+        <!-- TAB CONTENT: TIMELINE & NOTES -->
+        <div id="tab-timeline" class="modal-tab-pane" style="display: none;">
+          <div style="margin-bottom: 24px;">
+            <h3 class="detail-section-title">Add Update Note</h3>
+            <form id="note-submit-form" class="note-input-box" onsubmit="submitJobNote(event, ${job.id})">
+              <div>
+                <label style="font-size: 11px; display: block; margin-bottom: 4px;">Note Originator</label>
+                <select id="note-originator-select" style="padding: 8px 12px; width: 220px;">
+                  <option value="none"></option>
+                  <option value="user">User (Me)</option>
+                  <option value="other_generic">Other Representative</option>
+                  ${job.contacts.map(c => `
+                    <option value="contact_${c.id}">${escapeHTML(c.name)} (Contact)</option>
+                  `).join('')}
+                </select>
+              </div>
+              <textarea id="note-content-input" placeholder="Type details of your email exchange, feedback, or logs..." required></textarea>
+              <button type="submit" class="btn btn-primary btn-sm" style="align-self: flex-end;">Save Note</button>
+            </form>
+          </div>
+
+          <div>
+            <h3 class="detail-section-title">Activity & Historical Feed</h3>
+            <div class="notes-container">
+              ${feed.length > 0 ? feed.map(item => {
+                if (item.type === 'note') {
+                  let author = '';
+                  if (item.data.originator_type === 'user') author = 'User (Me)';
+                  else if (item.data.originator_type === 'recruiter') author = item.data.contact_name ? `${escapeHTML(item.data.contact_name)}` : '';
+                  else if (item.data.originator_type === 'other') author = 'Other Representative';
+
+                  return `
+                    <div class="note-card" id="note-card-${item.data.id}">
+                      <div class="note-header" style="display: flex; justify-content: space-between; align-items: center;">
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                          ${author ? `<span class="note-originator" style="color: ${item.data.originator_type === 'user' ? 'var(--theme-secondary)' : 'var(--theme-primary)'}">${author}</span>` : ''}
+                          <button class="btn btn-secondary btn-sm" style="padding: 2px 6px; font-size: 10px; line-height: 1;" onclick="enterNoteEditMode(${item.data.id})">✏️ Edit</button>
+                        </div>
+                        <span>${new Date(item.data.created_at).toLocaleString()}</span>
+                      </div>
+                      
+                      <!-- View mode -->
+                      <div id="note-view-${item.data.id}">
+                        <div class="note-body">${escapeHTML(item.data.content)}</div>
+                      </div>
+                      
+                      <!-- Edit mode -->
+                      <div id="note-edit-${item.data.id}" style="display: none; margin-top: 8px;">
+                        <textarea id="note-edit-textarea-${item.data.id}" style="width: 100%; min-height: 80px; padding: 8px; margin-bottom: 8px; font-family: var(--font-body); font-size: 13px; background: rgba(0,0,0,0.3); color: var(--theme-text); border: 1px solid var(--theme-border); border-radius: var(--radius-sm); resize: vertical;">${escapeHTML(item.data.content)}</textarea>
+                          <div style="display: flex; justify-content: space-between; align-items: center;">
+                          <button class="btn btn-danger btn-sm" style="padding: 4px 8px; font-size: 11px;" onclick="deleteJobNote(${item.data.id}, ${job.id})">Delete Note</button>
+                          <div style="display: flex; gap: 8px;">
+                            <button class="btn btn-secondary btn-sm" style="padding: 4px 8px; font-size: 11px;" onclick="cancelNoteEditMode(${item.data.id})">Cancel</button>
+                            <button class="btn btn-primary btn-sm" style="padding: 4px 8px; font-size: 11px;" onclick="saveNoteEdit(${item.data.id}, ${job.id})">Save</button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  `;
+                } else if (item.type === 'file') {
+                  return `
+                    <div class="file-row" style="margin-bottom: 8px; background: rgba(0,0,0,0.05); padding: 8px; border-radius: var(--radius-sm);">
+                      <div class="file-name">
+                        <span style="margin-right: 6px; color: var(--theme-secondary);">📄</span>
+                        <span>${escapeHTML(item.data.original_name)}</span>
+                      </div>
+                      <div style="display: flex; align-items: center; gap: 12px;">
+                        <span style="font-size: 11px; color: var(--theme-text-muted);">${new Date(item.data.uploaded_at).toLocaleDateString()}</span>
+                        <a href="/api/files/download/${item.data.stored_name}" download class="file-download-icon" data-tooltip="Download">⬇️</a>
+                      </div>
+                    </div>
+                  `;
+                } else if (item.type === 'event') {
+                  const color = item.data.is_tentative ? '#fbbf24' : '#10b981';
+                  return `
+                    <div class="file-row" style="margin-bottom: 8px; background: rgba(0,0,0,0.05); padding: 8px; border-radius: var(--radius-sm); border-left: 4px solid var(--theme-primary)">
+                      <div class="file-name">
+                        <span style="margin-right: 6px; color: var(--theme-primary);">📅</span>
+                        <div>
+                          <strong>${escapeHTML(item.data.description || 'Schedule Window')} (Past Event)</strong>
+                          <div style="font-size: 11px; color: var(--theme-text-muted);">
+                            ${formatEventDateTime(item.data.start_time)} to ${formatEventDateTime(item.data.end_time)} (${item.data.timezone})
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  `;
+                }
+                return '';
+              }).join('') : `
+                <div style="color: var(--theme-text-muted); font-size: 14px; text-align: center; padding: 24px 0;">No history logged.</div>
+              `}
+            </div>
+          </div>
         </div>
       `;
+
     } else {
       // --- EDIT MODE TEMPLATE ---
       container.innerHTML = `
@@ -2441,19 +2969,19 @@ async function renderDetailModalContent() {
             <textarea id="edit-desc" placeholder="Paste job details..." style="min-height: 220px;">${escapeHTML(job.description || '')}</textarea>
           </div>
 
-          <div class="form-row">
-            <div class="form-group">
+          <div class="form-row" style="margin-bottom: 0;">
+            <div class="form-group" style="margin-bottom: 0;">
               <label for="edit-req">Required Experience</label>
               <textarea id="edit-req" placeholder="Paste required experience details..." style="min-height: 200px;">${escapeHTML(job.required_experience || '')}</textarea>
             </div>
-            <div class="form-group">
+            <div class="form-group" style="margin-bottom: 0;">
               <label for="edit-pref">Preferred Experience</label>
               <textarea id="edit-pref" placeholder="Paste preferred/bonus qualifications..." style="min-height: 200px;">${escapeHTML(job.preferred_experience || '')}</textarea>
             </div>
           </div>
 
           <!-- Bottom controls -->
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 32px; padding-top: 20px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 16px;">
             <button type="button" class="btn btn-danger" onclick="deleteJobOpportunity(${job.id})" style="display: flex; align-items: center; gap: 6px;">
               <span>🗑️</span>
               <span>Delete Opportunity</span>
@@ -2468,6 +2996,11 @@ async function renderDetailModalContent() {
           </div>
         </form>
       `;
+    }
+    
+    // Restore active tab
+    if (!isEditMode) {
+        switchDetailTab(activeDetailTab);
     }
   } catch (err) {
     console.error(err);
@@ -2490,6 +3023,207 @@ window.triggerFilePicker = () => {
 window.toggleEditMode = (edit) => {
   isEditMode = edit;
   renderDetailModalContent();
+};
+
+window.switchDetailTab = (tabId) => {
+  activeDetailTab = tabId;
+  const tabs = ['tab-overview', 'tab-tasks', 'tab-prep', 'tab-timeline'];
+  tabs.forEach(t => {
+    const el = document.getElementById(t);
+    if (el) el.style.display = t === tabId ? 'block' : 'none';
+  });
+
+  const buttons = document.querySelectorAll('.modal-tab-btn');
+  buttons.forEach(btn => {
+    if (btn.getAttribute('data-target') === tabId) {
+      btn.style.borderBottom = '2px solid var(--theme-primary)';
+      btn.style.color = 'var(--theme-primary)';
+    } else {
+      btn.style.borderBottom = 'none';
+      btn.style.color = 'var(--theme-text-muted)';
+    }
+  });
+};
+
+// --- Task & Prep Interactions ---
+window.refreshJobTasksList = async (jobId) => {
+  try {
+    const tasks = await apiFetch(`/api/jobs/${jobId}/tasks`);
+    const container = document.getElementById('job-tasks-list-container');
+    if (container) {
+      container.innerHTML = tasks.length > 0 ? tasks.map(t => `
+        <div style="display: flex; align-items: center; gap: 12px; padding: 12px; background: rgba(0,0,0,0.05); border: 1px solid var(--theme-border); border-radius: var(--radius-sm);">
+          <input type="checkbox" ${t.is_completed ? 'checked' : ''} style="width: 18px; height: 18px; cursor: pointer;" onchange="toggleJobTask(${jobId}, ${t.id}, this.checked)">
+          <span style="flex-grow: 1; font-size: 14px; text-decoration: ${t.is_completed ? 'line-through' : 'none'}; color: ${t.is_completed ? 'var(--theme-text-muted)' : 'var(--theme-text)'};">${escapeHTML(t.label)}</span>
+          <button class="btn btn-link btn-sm" style="color: #ef4444; padding: 4px;" onclick="deleteJobTask(${jobId}, ${t.id})">🗑️</button>
+        </div>
+      `).join('') : '<div style="color: var(--theme-text-muted); font-size: 14px;">No tasks.</div>';
+    }
+    // Update dashboard cache seamlessly
+    dashboardData.jobs.find(j => j.id === jobId).tasks = tasks;
+  } catch (err) {
+    console.error(err);
+  }
+};
+
+window.submitNewTask = async (jobId) => {
+  const input = document.getElementById('new-task-input');
+  const label = input.value.trim();
+  if (!label) return;
+  try {
+    await apiFetch(`/api/jobs/${jobId}/tasks`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ label, is_completed: false })
+    });
+    input.value = ''; // clear input
+    refreshJobTasksList(jobId);
+    showToast('Task added.', 'success');
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+};
+
+window.addSuggestedTask = async (jobId, label) => {
+  try {
+    await apiFetch(`/api/jobs/${jobId}/tasks`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ label, is_completed: false })
+    });
+    refreshJobTasksList(jobId);
+    showToast('Suggested task added.', 'success');
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+};
+
+window.toggleJobTask = async (jobId, taskId, isChecked) => {
+  try {
+    await apiFetch(`/api/jobs/${jobId}/tasks/${taskId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ is_completed: isChecked })
+    });
+    refreshJobTasksList(jobId);
+    showToast('Task updated.', 'success');
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+};
+
+window.deleteJobTask = async (jobId, taskId) => {
+  try {
+    await apiFetch(`/api/jobs/${jobId}/tasks/${taskId}`, { method: 'DELETE' });
+    refreshJobTasksList(jobId);
+    showToast('Task deleted.', 'success');
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+};
+
+// New Prep Handlers
+window.enterPrepEditMode = (field) => {
+  document.getElementById(`prep-${field}-view`).style.display = 'none';
+  document.getElementById(`prep-${field}-edit`).style.display = 'block';
+  document.getElementById(`prep-${field}-btns-view`).style.display = 'none';
+  document.getElementById(`prep-${field}-btns-edit`).style.display = 'flex';
+};
+
+window.cancelPrepEditMode = (field) => {
+  document.getElementById(`prep-${field}-view`).style.display = 'block';
+  document.getElementById(`prep-${field}-edit`).style.display = 'none';
+  document.getElementById(`prep-${field}-btns-view`).style.display = 'block';
+  document.getElementById(`prep-${field}-btns-edit`).style.display = 'none';
+};
+
+window.saveInterviewPrepField = async (jobId, field) => {
+  const otherField = field === 'research' ? 'questions' : 'research';
+  const valToSave = document.getElementById(`prep-${field}-edit`).value.trim();
+  
+  // We need current job state to not overwrite the other field
+  try {
+    const job = await apiFetch(`/api/jobs/${jobId}`);
+    let prepData = { research: '', questions: '' };
+    if (job.interview_prep && job.interview_prep !== 'None') {
+      try { prepData = JSON.parse(job.interview_prep); } catch(e) {}
+    }
+    
+    prepData[field] = valToSave;
+    
+    await apiFetch(`/api/jobs/${jobId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ interview_prep: JSON.stringify(prepData) })
+    });
+    showToast('Notes saved!', 'success');
+    
+    // Local DOM update
+    document.getElementById(`prep-${field}-view`).innerHTML = escapeHTML(valToSave) || '<span style="color: var(--theme-text-muted);">No notes added.</span>';
+    cancelPrepEditMode(field);
+    fetchDashboardData(); // background sync
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+};
+
+window.enterStarEditMode = (id) => {
+  document.getElementById(`star-view-${id}`).style.display = 'none';
+  document.getElementById(`star-edit-${id}`).style.display = 'block';
+};
+
+window.cancelStarEditMode = (id) => {
+  document.getElementById(`star-view-${id}`).style.display = 'block';
+  document.getElementById(`star-edit-${id}`).style.display = 'none';
+};
+
+window.saveStarStoryEdit = async (jobId, storyId) => {
+  const content = document.getElementById(`star-edit-textarea-${storyId}`).value.trim();
+  if (!content) return;
+  try {
+    await apiFetch(`/api/jobs/${jobId}/star_stories/${storyId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ story: content })
+    });
+    document.getElementById(`star-view-${storyId}`).innerHTML = escapeHTML(content);
+    cancelStarEditMode(storyId);
+    showToast('STAR story updated.', 'success');
+  } catch(err) {
+    showToast(err.message, 'error');
+  }
+};
+
+window.submitStarStory = async (e, jobId) => {
+  e.preventDefault();
+  const topic = document.getElementById('star-topic').value.trim();
+  const story = document.getElementById('star-story').value.trim();
+  if (!topic || !story) return;
+
+  try {
+    await apiFetch(`/api/jobs/${jobId}/star_stories`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ topic, story })
+    });
+    renderDetailModalContent();
+    showToast('STAR story added.', 'success');
+    
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+};
+
+window.deleteStarStory = async (jobId, storyId) => {
+  if (!await showConfirmDialog('🗑️ Delete Story', 'Delete this STAR story?', 'Delete')) return;
+  try {
+    await apiFetch(`/api/jobs/${jobId}/star_stories/${storyId}`, { method: 'DELETE' });
+    renderDetailModalContent();
+    showToast('STAR story deleted.', 'success');
+    
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
 };
 
 // Actions triggers inside expanded modal
@@ -2528,8 +3262,8 @@ window.updateJobStatus = async (jobId, statusId) => {
 window.snoozeStaleAlert = async (jobId) => {
   try {
     await apiFetch(`/api/jobs/${jobId}/snooze`, { method: 'POST' });
-    fetchDashboardData();
-    openJobDetailModal(jobId);
+    await fetchDashboardData();
+    renderDetailModalContent();
     showToast('Stale alert snoozed successfully.', 'success');
   } catch (err) {
     console.error(err);
@@ -2567,7 +3301,8 @@ window.submitJobNote = async (e, jobId) => {
       })
     });
     textarea.value = '';
-    openJobDetailModal(jobId);
+    await fetchDashboardData();
+    renderDetailModalContent();
   } catch (err) {
     showToast(err.message, 'error');
   }
@@ -2587,7 +3322,9 @@ window.submitJobContact = async (e, jobId) => {
       body: JSON.stringify({ name, email, phone })
     });
     toggleWidgetForm('contact-widget-form', false);
-    openJobDetailModal(jobId);
+    await fetchDashboardData();
+    renderDetailModalContent();
+    showToast('Contact added.', 'success');
   } catch (err) {
     showToast(err.message, 'error');
   }
@@ -2700,8 +3437,8 @@ window.saveJobDetailsEdit = async (e, jobId) => {
       body: JSON.stringify(body)
     });
     isEditMode = false;
-    await fetchDashboardData();
-    openJobDetailModal(jobId);
+    await await fetchDashboardData();
+    renderDetailModalContent();
   } catch (err) {
     showToast(err.message, 'error');
   }

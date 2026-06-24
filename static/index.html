@@ -32,6 +32,10 @@
           <span style="font-size: 16px; margin-right: 4px;">🗂️</span>
           <span>Job Board</span>
         </button>
+        <button id="nav-metrics" class="nav-item">
+          <span style="font-size: 16px; margin-right: 4px;">📊</span>
+          <span>Metrics</span>
+        </button>
         <button id="nav-calendar" class="nav-item">
           <span style="font-size: 16px; margin-right: 4px;">📅</span>
           <span>Calendar</span>
@@ -200,6 +204,12 @@
         </div>
       </div>
 
+      <div id="panel-metrics" class="view-panel">
+        <div id="metrics-dashboard-content" style="display: flex; flex-direction: column; gap: 24px;">
+          <!-- Injected by JS -->
+        </div>
+      </div>
+
       <!-- 2. Calendar View -->
       <div id="panel-calendar" class="view-panel">
         <div class="calendar-container">
@@ -342,6 +352,22 @@
             </div>
           </section>
 
+          <!-- Suggested Action Items Settings Category -->
+          <section class="settings-section">
+            <h3>Suggested To-Do Tasks</h3>
+            <div style="display: flex; flex-direction: column; gap: 16px;">
+              <div id="global-task-edit-list-container" class="status-edit-list">
+                <!-- Rendered by JS -->
+              </div>
+
+              <form id="create-global-task-form" style="background: rgba(0,0,0,0.1); padding: 16px; borderRadius: var(--radius-sm); display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+                <strong style="font-size: 13px;">Add Task:</strong>
+                <input type="text" id="new-global-task-label" placeholder="e.g. Customize cover letter" required style="flex-grow: 1; min-width: 150px; padding: 8px 12px;">
+                <button type="submit" class="btn btn-primary btn-sm">Create Task</button>
+              </form>
+            </div>
+          </section>
+
           <!-- Application parameters settings -->
           <section class="settings-section">
             <h3>Application Parameter Settings</h3>
@@ -432,7 +458,7 @@
 
     <!-- Modal 1: "+ Add New Job" -->
     <div id="add-job-modal" class="modal-overlay">
-      <div class="modal-content" style="max-width: 1000px;">
+      <div class="modal-content" style="min-width: 1000px; width: 60vw; max-width: 95vw;">
         <button class="modal-close-btn" onclick="closeAddJobModal()">×</button>
         <h2 style="font-family: var(--font-heading); margin-bottom: 24px;">Add New Job Opportunity</h2>
         
@@ -504,18 +530,18 @@
             <textarea id="job-desc" placeholder="Paste job details..." style="min-height: 220px;"></textarea>
           </div>
 
-          <div class="form-row">
-            <div class="form-group">
+          <div class="form-row" style="margin-bottom: 0;">
+            <div class="form-group" style="margin-bottom: 0;">
               <label for="job-req">Required Experience</label>
               <textarea id="job-req" placeholder="Paste required experience details..." style="min-height: 200px;"></textarea>
             </div>
-            <div class="form-group">
+            <div class="form-group" style="margin-bottom: 0;">
               <label for="job-pref">Preferred Experience</label>
               <textarea id="job-pref" placeholder="Paste preferred/bonus qualifications..." style="min-height: 200px;"></textarea>
             </div>
           </div>
 
-          <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 24px;">
+          <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 16px;">
             <button type="button" class="btn btn-secondary" onclick="closeAddJobModal()">Cancel</button>
             <button type="submit" class="btn btn-primary">Save Job Opportunity</button>
           </div>
@@ -525,7 +551,7 @@
 
     <!-- Modal 2: Floating Card Job Expanded Detail View -->
     <div id="job-detail-modal" class="modal-overlay">
-      <div class="modal-content" style="max-width: 1000px;">
+      <div class="modal-content" style="min-width: 1000px; width: 60vw; max-width: 95vw;">
         <button class="modal-close-btn" onclick="closeJobDetailModal()">×</button>
         
         <!-- Toggle View/Edit Mode Button -->
@@ -704,8 +730,7 @@
 
   </div>
 
-
-
-  <script src="/app.js"></script>
+  <script src="lib/echarts.min.js"></script>
+  <script src="app.js"></script>
 </body>
 </html>

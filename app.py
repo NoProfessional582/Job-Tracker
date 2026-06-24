@@ -186,6 +186,28 @@ def init_db():
             acknowledged_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE
         );
+
+        CREATE TABLE IF NOT EXISTS global_tasks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            label TEXT NOT NULL,
+            sort_order INTEGER NOT NULL UNIQUE
+        );
+
+        CREATE TABLE IF NOT EXISTS job_tasks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_id INTEGER NOT NULL,
+            label TEXT NOT NULL,
+            is_completed BOOLEAN DEFAULT 0,
+            FOREIGN KEY(job_id) REFERENCES jobs(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS star_stories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_id INTEGER NOT NULL,
+            topic TEXT NOT NULL,
+            story TEXT NOT NULL,
+            FOREIGN KEY(job_id) REFERENCES jobs(id) ON DELETE CASCADE
+        );
     """)
 
     # 1b. Schema migrations for existing databases
@@ -229,6 +251,13 @@ def init_db():
         except Exception as e:
             print("Migration warning (requisition_id):", e)
 
+    if 'interview_prep' not in job_columns:
+        try:
+            cursor.execute("ALTER TABLE jobs ADD COLUMN interview_prep TEXT")
+            print("Migrated database: added interview_prep to jobs.")
+        except Exception as e:
+            print("Migration warning (interview_prep):", e)
+
     # Ensure acknowledged_notifications table exists for existing databases
     try:
         cursor.execute("""
@@ -243,14 +272,52 @@ def init_db():
     except Exception as e:
         print("Migration warning (acknowledged_notifications):", e)
 
+    # Ensure star_stories table exists for existing databases
+    try:
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS star_stories (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_id INTEGER NOT NULL,
+                topic TEXT NOT NULL,
+                story TEXT NOT NULL,
+                FOREIGN KEY(job_id) REFERENCES jobs(id) ON DELETE CASCADE
+            )
+        """)
+    except Exception as e:
+        print("Migration warning (star_stories):", e)
+
+    # Ensure tasks tables exist for existing databases
+    try:
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS global_tasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                label TEXT NOT NULL,
+                sort_order INTEGER NOT NULL UNIQUE
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS job_tasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_id INTEGER NOT NULL,
+                label TEXT NOT NULL,
+                is_completed BOOLEAN DEFAULT 0,
+                FOREIGN KEY(job_id) REFERENCES jobs(id) ON DELETE CASCADE
+            )
+        """)
+    except Exception as e:
+        print("Migration warning (tasks tables):", e)
+
+
+
     # 2. Seed Default Statuses
     cursor.execute("SELECT COUNT(*) FROM statuses")
     if cursor.fetchone()[0] == 0:
-        cursor.execute("INSERT INTO statuses (label, color, sort_order) VALUES ('Interested', '#38bdf8', 1)")
-        cursor.execute("INSERT INTO statuses (label, color, sort_order) VALUES ('Applied', '#818cf8', 2)")
-        cursor.execute("INSERT INTO statuses (label, color, sort_order) VALUES ('Screen', '#fb7185', 3)")
-        cursor.execute("INSERT INTO statuses (label, color, sort_order) VALUES ('Interviewing', '#fbbf24', 4)")
-        cursor.execute("INSERT INTO statuses (label, color, sort_order) VALUES ('Offer', '#34d399', 5)")
+        # Explicitly declare ID 1 and 2 to ensure they match hardcoded logic
+        cursor.execute("INSERT INTO statuses (id, label, color, sort_order) VALUES (1, 'Interested', '#38bdf8', 1)")
+        cursor.execute("INSERT INTO statuses (id, label, color, sort_order) VALUES (2, 'Applied', '#818cf8', 2)")
+        cursor.execute("INSERT INTO statuses (id, label, color, sort_order) VALUES (3, 'Screen', '#fb7185', 3)")
+        cursor.execute("INSERT INTO statuses (id, label, color, sort_order) VALUES (4, 'Interviewing', '#fbbf24', 4)")
+        cursor.execute("INSERT INTO statuses (id, label, color, sort_order) VALUES (5, 'Offer', '#34d399', 5)")
         print("Seeded default statuses.")
 
     # 2b. Seed Default Event Types
@@ -289,6 +356,11 @@ def init_db():
     # 4. Seed Default Settings
     cursor.execute("SELECT COUNT(*) FROM app_settings")
     if cursor.fetchone()[0] == 0:
+        # Provide some default preferences to ensure smooth first-time startup
+        cursor.execute("INSERT INTO app_settings (key, value) VALUES ('active_tab', 'nav-board')")
+        cursor.execute("INSERT INTO app_settings (key, value) VALUES ('kanban_view_mode', 'pipeline')")
+        cursor.execute("INSERT INTO app_settings (key, value) VALUES ('board_sort_field', 'created_at')")
+        cursor.execute("INSERT INTO app_settings (key, value) VALUES ('board_sort_direction', 'desc')")
         cursor.execute("INSERT INTO app_settings (key, value) VALUES ('stale_threshold_days', '14')")
         cursor.execute("INSERT INTO app_settings (key, value) VALUES ('snooze_duration_days', '7')")
         cursor.execute("INSERT INTO app_settings (key, value) VALUES ('default_status_id', '1')")
@@ -331,6 +403,18 @@ def init_db():
         new_tz = legacy_tz_map[row[0]]
         cursor.execute("UPDATE app_settings SET value = ? WHERE key = 'default_timezone'", (new_tz,))
         cursor.execute("UPDATE calendar_events SET timezone = ? WHERE timezone = ?", (new_tz, row[0]))
+
+    # Seed Default Global Tasks
+    cursor.execute("SELECT COUNT(*) FROM global_tasks")
+    if cursor.fetchone()[0] == 0:
+        default_tasks = [
+            ("Customize resume and cover letter", 1),
+            ("Message recruiter or connection on LinkedIn", 2),
+            ("Prepare STAR examples for interview", 3),
+            ("Send post-interview thank you email", 4)
+        ]
+        cursor.executemany("INSERT INTO global_tasks (label, sort_order) VALUES (?, ?)", default_tasks)
+        print("Seeded default global tasks.")
 
     conn.commit()
     conn.close()
@@ -564,14 +648,24 @@ def create_status():
 @app.put('/api/statuses/<int:id>')
 def update_status(id):
     data = get_json_data()
+    label = data['label']
+    
+    if id == 1:
+        label = 'Interested'
+    elif id == 2:
+        label = 'Applied'
+        
     db_execute(
         "UPDATE statuses SET label = ?, color = ?, sort_order = ? WHERE id = ?",
-        (data['label'], data['color'], data['sort_order'], id)
+        (label, data['color'], data['sort_order'], id)
     )
     return jsonify({"message": "Status updated"})
 
 @app.delete('/api/statuses/<int:id>')
 def delete_status(id):
+    if id in [1, 2]:
+        return jsonify({"error": "Cannot delete the hardcoded 'Interested' or 'Applied' categories!"}), 400
+
     default_id = int(get_setting_val('default_status_id', '1'))
     if id == default_id:
         return jsonify({"error": "Cannot delete the default status category!"}), 400
@@ -584,6 +678,8 @@ def delete_status(id):
 def reorder_statuses():
     data = get_json_data()
     orders = data.get('orders', [])
+    for item in orders:
+        db_execute("UPDATE statuses SET sort_order = ? WHERE id = ?", (-item['sort_order'], item['id']))
     for item in orders:
         db_execute("UPDATE statuses SET sort_order = ? WHERE id = ?", (item['sort_order'], item['id']))
     return jsonify({"message": "Statuses reordered"})
@@ -629,6 +725,8 @@ def reorder_event_types():
     data = get_json_data()
     orders = data.get('orders', [])
     for item in orders:
+        db_execute("UPDATE event_types SET sort_order = ? WHERE id = ?", (-item['sort_order'], item['id']))
+    for item in orders:
         db_execute("UPDATE event_types SET sort_order = ? WHERE id = ?", (item['sort_order'], item['id']))
     return jsonify({"message": "Event types reordered"})
 
@@ -637,7 +735,14 @@ def reorder_event_types():
 def get_organizations():
     return jsonify(rows_to_list(db_query("SELECT * FROM organizations ORDER BY name ASC")))
 
+
+@app.get('/api/metrics/transitions')
+def get_transitions():
+    sql = "SELECT job_id, content, created_at FROM notes WHERE content LIKE 'Application status changed to %' ORDER BY created_at ASC"
+    return jsonify(rows_to_list(db_query(sql)))
+
 # 5. Jobs Endpoints
+
 @app.get('/api/jobs')
 def get_jobs():
     sql = """
@@ -753,6 +858,10 @@ def create_job():
          remote, location, requisition_id
      ))
     
+    global_tasks = db_query("SELECT label FROM global_tasks ORDER BY sort_order ASC")
+    for gt in global_tasks:
+        db_execute("INSERT INTO job_tasks (job_id, label, is_completed) VALUES (?, ?, 0)", (job_id, gt['label']))
+    
     return jsonify({"id": job_id, "title": data['title']}), 201
 
 @app.put('/api/jobs/<int:id>')
@@ -800,6 +909,9 @@ def update_job(id):
     location = clean_field_update('location', current['location'])
     remote = 1 if data.get('remote') else 0 if 'remote' in data else current['remote']
     requisition_id = clean_field_update('requisition_id', current['requisition_id'])
+    
+    current_dict = dict(current)
+    interview_prep = data.get('interview_prep', current_dict.get('interview_prep', 'None'))
 
     db_execute("""
          UPDATE jobs 
@@ -818,15 +930,124 @@ def update_job(id):
              remote = ?,
              location = ?,
              requisition_id = ?,
+             interview_prep = ?,
              updated_at = datetime('now')
          WHERE id = ?
      """, (
          org_id, data.get('status_id'), data.get('title'), data.get('posted_date'),
          data.get('end_date'), salary_range, other_compensation,
          description, required_experience, preferred_experience,
-         data.get('target_url'), remote, location, requisition_id, id
+         data.get('target_url'), remote, location, requisition_id, interview_prep, id
      ))
     return jsonify({"message": "Job updated"})
+
+# --- GLOBAL TASKS API ---
+@app.get('/api/global_tasks')
+def get_global_tasks():
+    rows = db_query("SELECT * FROM global_tasks ORDER BY sort_order")
+    return jsonify(rows_to_list(rows))
+
+@app.post('/api/global_tasks')
+def add_global_task():
+    data = get_json_data()
+    label = data.get('label')
+    if not label:
+        return jsonify({"error": "Label is required"}), 400
+    row = db_query("SELECT MAX(sort_order) as m FROM global_tasks", one=True)
+    next_sort = (row['m'] or 0) + 1
+    new_id = db_execute("INSERT INTO global_tasks (label, sort_order) VALUES (?, ?)", (label, next_sort))
+    return jsonify({"id": new_id, "label": label, "sort_order": next_sort}), 201
+
+@app.put('/api/global_tasks/<int:id>')
+def update_global_task(id):
+    data = get_json_data()
+    label = data.get('label')
+    sort_order = data.get('sort_order')
+    if label:
+        db_execute("UPDATE global_tasks SET label = ? WHERE id = ?", (label, id))
+    if sort_order is not None:
+        db_execute("UPDATE global_tasks SET sort_order = ? WHERE id = ?", (sort_order, id))
+    return jsonify({"message": "Task updated"})
+
+@app.delete('/api/global_tasks/<int:id>')
+def delete_global_task(id):
+    db_execute("DELETE FROM global_tasks WHERE id = ?", (id,))
+    return jsonify({"message": "Task deleted"})
+
+@app.put('/api/global_tasks/reorder')
+def reorder_global_tasks():
+    data = get_json_data()
+    orders = data.get('orders', [])
+    for item in orders:
+        db_execute("UPDATE global_tasks SET sort_order = ? WHERE id = ?", (-item['sort_order'], item['id']))
+    for item in orders:
+        db_execute("UPDATE global_tasks SET sort_order = ? WHERE id = ?", (item['sort_order'], item['id']))
+    return jsonify({"message": "Tasks reordered"})
+
+# --- JOB TASKS API ---
+@app.get('/api/jobs/<int:id>/tasks')
+def get_job_tasks(id):
+    rows = db_query("SELECT * FROM job_tasks WHERE job_id = ?", (id,))
+    return jsonify(rows_to_list(rows))
+
+@app.post('/api/jobs/<int:id>/tasks')
+def add_job_task(id):
+    data = get_json_data()
+    label = data.get('label')
+    if not label:
+        return jsonify({"error": "Label is required"}), 400
+    new_id = db_execute("INSERT INTO job_tasks (job_id, label, is_completed) VALUES (?, ?, 0)", (id, label))
+    return jsonify({"id": new_id, "job_id": id, "label": label, "is_completed": 0}), 201
+
+@app.put('/api/jobs/<int:id>/tasks/<int:task_id>')
+def update_job_task(id, task_id):
+    data = get_json_data()
+    is_completed = 1 if data.get('is_completed') else 0
+    label = data.get('label')
+    if label:
+        db_execute("UPDATE job_tasks SET is_completed = ?, label = ? WHERE id = ? AND job_id = ?", (is_completed, label, task_id, id))
+    else:
+        db_execute("UPDATE job_tasks SET is_completed = ? WHERE id = ? AND job_id = ?", (is_completed, task_id, id))
+    return jsonify({"message": "Task updated"})
+
+@app.delete('/api/jobs/<int:id>/tasks/<int:task_id>')
+def delete_job_task(id, task_id):
+    db_execute("DELETE FROM job_tasks WHERE id = ? AND job_id = ?", (task_id, id))
+    return jsonify({"message": "Task deleted"})
+
+# --- STAR STORIES API ---
+@app.get('/api/jobs/<int:id>/star_stories')
+def get_star_stories(id):
+    rows = db_query("SELECT * FROM star_stories WHERE job_id = ?", (id,))
+    return jsonify(rows_to_list(rows))
+
+@app.post('/api/jobs/<int:id>/star_stories')
+def add_star_story(id):
+    data = get_json_data()
+    topic = data.get('topic')
+    story = data.get('story')
+    if not topic or not story:
+        return jsonify({"error": "Topic and story are required"}), 400
+    new_id = db_execute("INSERT INTO star_stories (job_id, topic, story) VALUES (?, ?, ?)", (id, topic, story))
+    return jsonify({"id": new_id, "job_id": id, "topic": topic, "story": story}), 201
+
+@app.put('/api/jobs/<int:id>/star_stories/<int:story_id>')
+def update_star_story(id, story_id):
+    data = get_json_data()
+    row = db_query("SELECT topic, story FROM star_stories WHERE id = ?", (story_id,), one=True)
+    if not row:
+        return jsonify({"error": "Not found"}), 404
+        
+    topic = data.get('topic', row['topic'])
+    story = data.get('story', row['story'])
+    
+    db_execute("UPDATE star_stories SET topic = ?, story = ? WHERE id = ? AND job_id = ?", (topic, story, story_id, id))
+    return jsonify({"message": "Story updated"})
+
+@app.delete('/api/jobs/<int:id>/star_stories/<int:story_id>')
+def delete_star_story(id, story_id):
+    db_execute("DELETE FROM star_stories WHERE id = ? AND job_id = ?", (story_id, id))
+    return jsonify({"message": "Story deleted"})
 
 @app.delete('/api/jobs/<int:id>')
 def delete_job(id):
