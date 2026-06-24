@@ -3,6 +3,7 @@ let activeTab = 'kanban'; // 'kanban', 'calendar', 'settings'
 let kanbanViewMode = 'pipeline'; // 'pipeline', 'organization'
 let calendarViewMode = 'month'; // 'month', 'week'
 let filterStatuses = []; // Hidden status IDs
+let filterSearch = '';
 let filterLocation = '';
 let filterRemoteOnly = false;
 let boardSortPref = 'last_activity';
@@ -318,16 +319,80 @@ async function fetchDashboardData() {
     eventTypes = eventTypesData;
     timezones = timezonesData;
 
-    const boardSortSelect = document.getElementById('board-sort-select');
-    if (boardSortSelect && !boardSortSelect.dataset.userChanged) {
+    // Apply loaded view preferences from settings database
+    if (settings.pref_kanban_view_mode) {
+      kanbanViewMode = settings.pref_kanban_view_mode;
+      const pipelineBtn = document.getElementById('btn-view-pipeline');
+      const orgBtn = document.getElementById('btn-view-org');
+      if (pipelineBtn && orgBtn) {
+        pipelineBtn.classList.toggle('active', kanbanViewMode === 'pipeline');
+        orgBtn.classList.toggle('active', kanbanViewMode === 'organization');
+      }
+    }
+    if (settings.pref_calendar_view_mode) {
+      calendarViewMode = settings.pref_calendar_view_mode;
+      const calMonthBtn = document.getElementById('btn-cal-month');
+      const calWeekBtn = document.getElementById('btn-cal-week');
+      if (calMonthBtn && calWeekBtn) {
+        calMonthBtn.classList.toggle('active', calendarViewMode === 'month');
+        calWeekBtn.classList.toggle('active', calendarViewMode === 'week');
+      }
+    }
+    if (settings.pref_board_sort_pref) {
+      boardSortPref = settings.pref_board_sort_pref;
+    } else {
       boardSortPref = settings.kanban_default_sort || 'last_activity';
+    }
+    const boardSortSelect = document.getElementById('board-sort-select');
+    if (boardSortSelect) {
       boardSortSelect.value = boardSortPref;
+    }
+    if (settings.pref_board_sort_dir) {
+      boardSortDir = settings.pref_board_sort_dir;
+      const sortDirArrow = document.getElementById('sort-dir-arrow');
+      if (sortDirArrow) {
+        sortDirArrow.textContent = boardSortDir === 'asc' ? '↑' : '↓';
+      }
+    }
+    if (settings.pref_board_title_clamp) {
+      boardTitleClamp = settings.pref_board_title_clamp;
+      const clampSelect = document.getElementById('board-title-clamp-select');
+      if (clampSelect) {
+        clampSelect.value = boardTitleClamp;
+      }
+    }
+    if (settings.pref_board_card_layout) {
+      boardCardLayout = settings.pref_board_card_layout;
+      const layoutSelect = document.getElementById('board-card-layout-select');
+      if (layoutSelect) {
+        layoutSelect.value = boardCardLayout;
+      }
+    }
+    if (settings.pref_board_group_pref) {
+      boardGroupPref = settings.pref_board_group_pref;
+      const groupSelect = document.getElementById('board-group-select');
+      if (groupSelect) {
+        groupSelect.value = boardGroupPref;
+      }
+    }
+    if (settings.pref_filter_statuses) {
+      try {
+        filterStatuses = JSON.parse(settings.pref_filter_statuses);
+      } catch (e) {
+        filterStatuses = [];
+      }
     }
 
     applyActiveTheme();
     renderAlertsBanner();
     applyUserName(settings.user_name || '');
-    refreshUI();
+    
+    // Switch to active tab preference
+    if (settings.pref_active_tab) {
+      switchTab(settings.pref_active_tab, false);
+    } else {
+      refreshUI();
+    }
   } catch (err) {
     console.error('Failed to load dashboard data:', err);
   }
@@ -573,39 +638,67 @@ const tabs = [
   { id: 'settings', navId: 'nav-settings', panelId: 'panel-settings' }
 ];
 
-tabs.forEach(tab => {
-  document.getElementById(tab.navId).addEventListener('click', () => {
-    activeTab = tab.id;
-    
-    // Toggle active classes
-    tabs.forEach(t => {
-      document.getElementById(t.navId).classList.toggle('active', t.id === tab.id);
-      document.getElementById(t.panelId).classList.toggle('active', t.id === tab.id);
+async function savePreferenceToDb(key, value) {
+  try {
+    settings[key] = String(value);
+    await apiFetch('/api/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ [key]: String(value) })
     });
+  } catch (err) {
+    console.error(`Failed to save preference ${key}:`, err);
+  }
+}
 
-    // Update Header titles
-    const title = document.getElementById('view-title');
-    const subtitle = document.getElementById('view-subtitle');
-    const btnAdd = document.getElementById('btn-add-job-trigger');
-
-    if (activeTab === 'kanban') {
-      const userName = (settings.user_name || '').trim();
-      title.textContent = userName ? `${userName}'s Job Board` : 'Job Board';
-      subtitle.textContent = 'Manage your job search pipeline';
-      btnAdd.style.display = 'inline-flex';
-    } else if (activeTab === 'calendar') {
-      title.textContent = 'Events Calendar';
-      subtitle.textContent = 'Plan and track hiring related events';
-      btnAdd.style.display = 'none';
-    } else if (activeTab === 'settings') {
-      title.textContent = 'Admin & Settings';
-      subtitle.textContent = 'Customize theme appearance, statuses, and options';
-      btnAdd.style.display = 'none';
-    }
-
-    renderAlertsBanner();
-    refreshUI();
+function switchTab(tabId, saveToDb = false) {
+  activeTab = tabId;
+  const tab = tabs.find(t => t.id === tabId);
+  if (!tab) return;
+  
+  // Toggle active classes
+  tabs.forEach(t => {
+    const navBtn = document.getElementById(t.navId);
+    const panel = document.getElementById(t.panelId);
+    if (navBtn) navBtn.classList.toggle('active', t.id === tabId);
+    if (panel) panel.classList.toggle('active', t.id === tabId);
   });
+
+  // Update Header titles
+  const title = document.getElementById('view-title');
+  const subtitle = document.getElementById('view-subtitle');
+  const btnAdd = document.getElementById('btn-add-job-trigger');
+
+  if (activeTab === 'kanban') {
+    const userName = (settings.user_name || '').trim();
+    if (title) title.textContent = userName ? `${userName}'s Job Board` : 'Job Board';
+    if (subtitle) subtitle.textContent = 'Manage your job search pipeline';
+    if (btnAdd) btnAdd.style.display = 'inline-flex';
+  } else if (activeTab === 'calendar') {
+    if (title) title.textContent = 'Events Calendar';
+    if (subtitle) subtitle.textContent = 'Plan and track hiring related events';
+    if (btnAdd) btnAdd.style.display = 'none';
+  } else if (activeTab === 'settings') {
+    if (title) title.textContent = 'Admin & Settings';
+    if (subtitle) subtitle.textContent = 'Customize theme appearance, statuses, and options';
+    if (btnAdd) btnAdd.style.display = 'none';
+  }
+
+  renderAlertsBanner();
+  refreshUI();
+  
+  if (saveToDb) {
+    savePreferenceToDb('pref_active_tab', tabId);
+  }
+}
+
+tabs.forEach(tab => {
+  const el = document.getElementById(tab.navId);
+  if (el) {
+    el.addEventListener('click', () => {
+      switchTab(tab.id, true);
+    });
+  }
 });
 
 // Brand click home button navigation redirect
@@ -633,6 +726,19 @@ function refreshUI() {
 
 // --- 1. Kanban Board Views Renderer ---
 function renderKanbanFilters() {
+  // Populate location datalist with unique locations from jobs
+  const locationDatalist = document.getElementById('location-datalist');
+  if (locationDatalist) {
+    const uniqueLocations = [...new Set(jobs
+      .map(j => j.location ? j.location.trim() : '')
+      .filter(loc => loc !== '' && loc.toLowerCase() !== 'none')
+    )].sort();
+    
+    locationDatalist.innerHTML = uniqueLocations
+      .map(loc => `<option value="${escapeHTML(loc)}"></option>`)
+      .join('');
+  }
+
   const container = document.getElementById('filter-checkboxes-container');
   container.innerHTML = '';
 
@@ -654,6 +760,7 @@ function renderKanbanFilters() {
       } else {
         filterStatuses.push(st.id);
       }
+      savePreferenceToDb('pref_filter_statuses', JSON.stringify(filterStatuses));
       renderKanbanFilters();
       renderKanbanBoard();
     };
@@ -697,6 +804,10 @@ function getSortedJobs(jobList) {
         return ((b.remote || 0) - (a.remote || 0)) * dirMultiplier;
       }
       return (new Date(b.last_activity) - new Date(a.last_activity)) * dirMultiplier;
+    } else if (sortPref === 'status') {
+      const orderA = a.status_sort_order ?? 0;
+      const orderB = b.status_sort_order ?? 0;
+      return (orderA - orderB) * -dirMultiplier;
     }
     return 0;
   });
@@ -873,6 +984,18 @@ function renderKanbanBoard() {
 
   let visibleJobs = jobs.filter(job => !filterStatuses.includes(job.status_id));
 
+  // Filter by Search Query
+  if (filterSearch) {
+    visibleJobs = visibleJobs.filter(job => {
+      const t = job.title ? job.title.toLowerCase() : '';
+      const o = job.organization_name ? job.organization_name.toLowerCase() : '';
+      const d = job.description ? job.description.toLowerCase() : '';
+      const req = job.required_experience ? job.required_experience.toLowerCase() : '';
+      const pref = job.preferred_experience ? job.preferred_experience.toLowerCase() : '';
+      return t.includes(filterSearch) || o.includes(filterSearch) || d.includes(filterSearch) || req.includes(filterSearch) || pref.includes(filterSearch);
+    });
+  }
+
   // Filter by Remote
   if (filterRemoteOnly) {
     visibleJobs = visibleJobs.filter(job => job.remote === 1);
@@ -885,7 +1008,7 @@ function renderKanbanBoard() {
 
   if (kanbanViewMode === 'pipeline') {
     // 1. Pipeline Status Columns
-    statuses.forEach(status => {
+    statuses.filter(status => !filterStatuses.includes(status.id)).forEach(status => {
       const colJobs = visibleJobs.filter(j => j.status_id === status.id);
       const sortedJobs = getSortedJobs(colJobs);
 
@@ -949,6 +1072,7 @@ function renderKanbanBoard() {
 // Bind Kanban Controls
 document.getElementById('btn-view-pipeline').addEventListener('click', () => {
   kanbanViewMode = 'pipeline';
+  savePreferenceToDb('pref_kanban_view_mode', 'pipeline');
   document.getElementById('btn-view-pipeline').classList.add('active');
   document.getElementById('btn-view-org').classList.remove('active');
   renderKanbanBoard();
@@ -956,6 +1080,7 @@ document.getElementById('btn-view-pipeline').addEventListener('click', () => {
 
 document.getElementById('btn-view-org').addEventListener('click', () => {
   kanbanViewMode = 'organization';
+  savePreferenceToDb('pref_kanban_view_mode', 'organization');
   document.getElementById('btn-view-pipeline').classList.remove('active');
   document.getElementById('btn-view-org').classList.add('active');
   renderKanbanBoard();
@@ -1345,6 +1470,7 @@ function renderCalendar() {
 // Bind Calendar controls navigation
 document.getElementById('btn-cal-month').addEventListener('click', () => {
   calendarViewMode = 'month';
+  savePreferenceToDb('pref_calendar_view_mode', 'month');
   document.getElementById('btn-cal-month').classList.add('active');
   document.getElementById('btn-cal-week').classList.remove('active');
   renderCalendar();
@@ -1352,6 +1478,7 @@ document.getElementById('btn-cal-month').addEventListener('click', () => {
 
 document.getElementById('btn-cal-week').addEventListener('click', () => {
   calendarViewMode = 'week';
+  savePreferenceToDb('pref_calendar_view_mode', 'week');
   document.getElementById('btn-cal-month').classList.remove('active');
   document.getElementById('btn-cal-week').classList.add('active');
   renderCalendar();
@@ -3145,6 +3272,7 @@ document.addEventListener('DOMContentLoaded', () => {
     boardSortSelect.addEventListener('change', (e) => {
       boardSortPref = e.target.value;
       boardSortSelect.dataset.userChanged = 'true';
+      savePreferenceToDb('pref_board_sort_pref', boardSortPref);
       renderKanbanBoard();
     });
   }
@@ -3157,7 +3285,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (sortDirToggle) {
     sortDirToggle.addEventListener('click', () => {
       boardSortDir = boardSortDir === 'desc' ? 'asc' : 'desc';
-      localStorage.setItem('boardSortDir', boardSortDir);
+      savePreferenceToDb('pref_board_sort_dir', boardSortDir);
       if (sortDirArrow) {
         sortDirArrow.textContent = boardSortDir === 'asc' ? '↑' : '↓';
       }
@@ -3170,7 +3298,7 @@ document.addEventListener('DOMContentLoaded', () => {
     clampSelect.value = boardTitleClamp;
     clampSelect.addEventListener('change', (e) => {
       boardTitleClamp = e.target.value;
-      localStorage.setItem('boardTitleClamp', boardTitleClamp);
+      savePreferenceToDb('pref_board_title_clamp', boardTitleClamp);
       renderKanbanBoard();
     });
   }
@@ -3180,7 +3308,7 @@ document.addEventListener('DOMContentLoaded', () => {
     cardLayoutSelect.value = boardCardLayout;
     cardLayoutSelect.addEventListener('change', (e) => {
       boardCardLayout = e.target.value;
-      localStorage.setItem('boardCardLayout', boardCardLayout);
+      savePreferenceToDb('pref_board_card_layout', boardCardLayout);
       renderKanbanBoard();
     });
   }
@@ -3190,7 +3318,15 @@ document.addEventListener('DOMContentLoaded', () => {
     groupSelect.value = boardGroupPref;
     groupSelect.addEventListener('change', (e) => {
       boardGroupPref = e.target.value;
-      localStorage.setItem('boardGroupPref', boardGroupPref);
+      savePreferenceToDb('pref_board_group_pref', boardGroupPref);
+      renderKanbanBoard();
+    });
+  }
+
+  const filterSearchInput = document.getElementById('filter-search');
+  if (filterSearchInput) {
+    filterSearchInput.addEventListener('input', (e) => {
+      filterSearch = e.target.value.trim().toLowerCase();
       renderKanbanBoard();
     });
   }

@@ -125,6 +125,7 @@
                     <option value="salary">Salary (High to Low)</option>
                     <option value="location">Location (A to Z)</option>
                     <option value="remote_first">Remote First</option>
+                    <option value="status">Status</option>
                   </select>
                 </div>
 
@@ -170,11 +171,17 @@
                 </div>
               </div>
 
-              <!-- Location & Remote filters -->
+              <!-- Search, Location & Remote filters -->
               <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
                 <div style="display: flex; align-items: center; gap: 8px;">
+                  <label for="filter-search" style="font-size: 13px; font-weight: 600; color: var(--theme-text-muted);">🔍 Search:</label>
+                  <input type="text" id="filter-search" placeholder="Search title, company, notes..." style="padding: 6px 10px; font-size: 13px; border-radius: var(--radius-sm); background: rgba(0, 0, 0, 0.15); color: var(--theme-text); border: 1px solid var(--theme-border); width: 180px;">
+                </div>
+
+                <div style="display: flex; align-items: center; gap: 8px;">
                   <label for="filter-location" style="font-size: 13px; font-weight: 600; color: var(--theme-text-muted);">📍 Location:</label>
-                  <input type="text" id="filter-location" placeholder="Filter by location..." style="padding: 6px 10px; font-size: 13px; border-radius: var(--radius-sm); background: rgba(0, 0, 0, 0.15); color: var(--theme-text); border: 1px solid var(--theme-border); width: 160px;">
+                  <input type="text" id="filter-location" list="location-datalist" placeholder="Filter by location..." style="padding: 6px 10px; font-size: 13px; border-radius: var(--radius-sm); background: rgba(0, 0, 0, 0.15); color: var(--theme-text); border: 1px solid var(--theme-border); width: 160px;">
+                  <datalist id="location-datalist"></datalist>
                 </div>
 
                 <label style="display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--theme-text-muted); cursor: pointer;">

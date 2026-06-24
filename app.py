@@ -305,6 +305,17 @@ def init_db():
     # Ensure default_timezone is set
     cursor.execute("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('default_timezone', 'America/Los_Angeles')")
 
+    # Seed default user preferences
+    cursor.execute("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('pref_active_tab', 'kanban')")
+    cursor.execute("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('pref_kanban_view_mode', 'pipeline')")
+    cursor.execute("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('pref_calendar_view_mode', 'month')")
+    cursor.execute("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('pref_board_sort_pref', 'last_activity')")
+    cursor.execute("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('pref_board_sort_dir', 'desc')")
+    cursor.execute("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('pref_board_title_clamp', '3')")
+    cursor.execute("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('pref_board_card_layout', 'standard')")
+    cursor.execute("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('pref_board_group_pref', 'none')")
+    cursor.execute("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('pref_filter_statuses', '[]')")
+
     # Migrate legacy timezone strings to IANA names
     legacy_tz_map = {
         'EST': 'America/New_York',
