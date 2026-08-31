@@ -1333,5 +1333,6 @@ def get_alerts_history():
     return jsonify(rows_to_list(db_query(sql)))
 
 if __name__ == '__main__':
-    # Running locally
-    app.run(host='127.0.0.1', port=5000, debug=True)
+    # 0.0.0.0 so the container's published port can actually reach this --
+    # 127.0.0.1 here would only accept connections from inside the container itself.
+    app.run(host='0.0.0.0', port=5000, debug=False)

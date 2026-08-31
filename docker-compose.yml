@@ -1,0 +1,18 @@
+services:
+  job-tracker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: job-tracker
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges=true
+    volumes:
+      - /srv/apps/service-configs/job-tracker/db:/app/db
+      - /srv/apps/service-configs/job-tracker/uploads:/app/uploads
+    networks:
+      - frontend-proxy
+
+networks:
+  frontend-proxy:
+    external: true
